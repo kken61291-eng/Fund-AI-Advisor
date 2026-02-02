@@ -2,8 +2,12 @@ name: Daily AI Fund Advisor
 
 on:
   schedule:
-    - cron: '30 6 * * 1-5' # 北京时间 14:30
-  workflow_dispatch:
+    # 重点修改这里：
+    # Cron 语法: 分 时 日 月 周
+    # UTC 01:30 = 北京时间 09:30
+    # 1-5 代表周一到周五
+    - cron: '30 1 * * 1-5'
+  workflow_dispatch: # 保留手动触发按钮，方便随时测试
 
 jobs:
   analyze_and_report:
@@ -18,14 +22,14 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.10' # 【关键修改】升级到 3.10
+        python-version: '3.10'
         cache: 'pip'
 
     - name: Install dependencies
       run: |
         pip install -r requirements.txt
-        # 【新增】强制更新 google 库，防止缓存旧版
-        pip install --upgrade google-generativeai 
+        # 强制更新 google 库
+        pip install --upgrade google-generativeai
 
     - name: Run Analysis
       env:
