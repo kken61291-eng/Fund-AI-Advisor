@@ -2,84 +2,58 @@ class StrategyEngine:
     def __init__(self, config):
         self.cfg = config
         self.base_amt = config['global']['base_invest_amount']
-        self.max_daily = config['global']['max_daily_invest']
     
-    def evaluate(self, fund_info, tech_data, sentiment_score, sentiment_summary):
+    def calculate_final_decision(self, fund_info, tech_data, ai_result, market_ctx):
         """
-        核心决策逻辑：技术面 + 情绪面 + 资金管理
+        结合 AI 智慧与量化规则的最终决策
         """
-        rsi = tech_data.get('rsi', 50)
-        price_pos = tech_data.get('price_position', 'bear')
-        deviation = tech_data.get('ma_deviation', 0)  # 偏离度
+        action = ai_result.get('action_advice', '观望')
+        thesis = ai_result.get('thesis', '无逻辑')
         
-        action = "观望"
-        amount = 0
-        reason = []
-        risk_level = "低"
-
-        # --- 1. 极端超卖逻辑（左侧交易）---
-        if rsi < self.cfg['strategy']['rsi_buy_threshold']:
-            if sentiment_score >= 4:
-                action = "买入 (超卖反弹)"
-                # 超卖越严重，买入倍数越高（最多2倍）
-                multiplier = min(2.0, 1.0 + (35 - rsi) / 35)
-                amount = self.base_amt * multiplier
-                reason.append(f"RSI({rsi:.1f})极度超卖，情绪正常({sentiment_score}分)，建议分批抄底")
-                risk_level = "中"
-            else:
-                action = "小额试探"
-                amount = self.base_amt * 0.3
-                reason.append(f"超卖但情绪悲观({sentiment_score}分)，极小仓位试探或观望")
-
-        # --- 2. 趋势确认逻辑（右侧交易）---
-        elif price_pos == 'bull' and rsi < 65:
-            if sentiment_score >= 7:
-                action = "买入 (趋势确认)"
-                amount = self.base_amt * 1.2
-                reason.append(f"站上20日均线(+{deviation:.1f}%)，情绪利好，顺势加仓")
-            elif sentiment_score >= 5:
-                action = "常规定投"
-                amount = self.base_amt
-                reason.append("趋势向上但情绪中性，常规定投")
-
-        # --- 3. 止盈/风险控制逻辑---
-        elif rsi > self.cfg['strategy']['rsi_sell_threshold']:
-            action = "减仓/暂停"
-            amount = 0
-            reason.append(f"RSI({rsi:.1f})超买，且偏离均线{deviation:.1f}%，建议止盈或暂停定投")
-            risk_level = "高"
+        # --- 宏观红绿灯机制 (Macro Traffic Light) ---
+        # 如果北向资金流出超过 50亿，视为系统性风险，强制减仓或暂停
+        is_system_risk = market_ctx['north_money'] < -50
+        
+        # --- 风口捕捉 (Opportunity Hunter) ---
+        # 检查该基金所属板块，是否在今日全市场主力流入 Top5 中
+        sector_hot = False
+        for top_sec in market_ctx['top_sectors']:
+            # 简单的关键词匹配，比如 "白酒" in "食品饮料"
+            if fund_info['sector_keyword'] in top_sec:
+                sector_hot = True
+                break
+        
+        # --- 资金计算逻辑 ---
+        final_amt = 0
+        
+        if "买入" in action:
+            final_amt = self.base_amt
             
-        # --- 4. 均线下方积累逻辑 ---
-        elif price_pos == 'bear' and abs(deviation) < 5:
-            # 价格在均线下方但偏离不大，且情绪不崩
-            if sentiment_score >= 5:
-                action = "常规定投"
-                amount = self.base_amt
-                reason.append("震荡区间，坚持定投积累筹码")
-            else:
-                action = "暂停/观望"
-                reason.append(f"震荡但情绪偏弱({sentiment_score}分)，暂缓投入")
+            # 1. 顺势加仓：如果是热点板块，加倍
+            if sector_hot:
+                final_amt *= 1.5
+                thesis += " [🔥命中今日主力风口]"
+            
+            # 2. 强力买入信号
+            if "强力" in action:
+                final_amt *= 1.2
+            
+            # 3. 抄底信号：RSI < 30
+            if tech_data['rsi'] < 30:
+                thesis += " [超卖反弹博弈]"
 
-        else:
-            reason.append("信号不明确，建议观望")
+        # --- 风险熔断 ---
+        if is_system_risk and final_amt > 0:
+            final_amt *= 0.5 # 减半
+            thesis += " [⚠️外资大幅流出，仓位折半]"
 
-        # --- 资金风控 ---
-        if amount > self.base_amt * 1.5:
-            risk_level = "高"
-        elif amount > self.base_amt:
-            risk_level = "中"
-
-        # 生成报告
-        emoji_map = {"买入 (超卖反弹)": "🔥", "买入 (趋势确认)": "📈", "减仓/暂停": "⚠️", 
-                     "观望": "⏸️", "常规定投": "🔄", "小额试探": "🧪", "暂停/观望": "🛑"}
+        # 生成人类可读报告
+        report = f"**{fund_info['name']} ({fund_info['code']})**\n"
+        report += f"🎯 **决策**: {action} | 💰 **建议金额**: ¥{int(final_amt)}\n"
+        report += f"🧠 **核心逻辑**: {thesis}\n"
+        report += f"📈 **利多**: {ai_result.get('pros', 'N/A')}\n"
+        report += f"📉 **利空**: {ai_result.get('cons', 'N/A')}\n"
+        report += f"🛡️ **风险**: {ai_result.get('risk_warning', 'N/A')}\n"
+        report += f"📊 **技术**: RSI={tech_data['rsi']:.1f} | 趋势={tech_data['price_position']}\n"
         
-        icon = emoji_map.get(action, "⏸️")
-        
-        report = f"""
-**{icon} {fund_info['name']} ({fund_info['code']})**
-- **操作**: {action} | **金额**: ¥{int(amount)} | **风险**: {risk_level}
-- **AI情绪**: {sentiment_summary} ({sentiment_score}/10)
-- **技术面**: RSI={rsi:.1f} | 趋势={'多头📈' if price_pos=='bull' else '空头📉'} | 偏离MA20: {deviation:.1f}%
-- **逻辑**: {'; '.join(reason)}
-"""
-        return report.strip()
+        return report
