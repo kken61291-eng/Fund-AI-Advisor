@@ -3,10 +3,9 @@ import smtplib
 import logging
 import os
 from email.mime.text import MIMEText
-from email.header import Header
+from email.utils import formataddr # 【新增】专门处理发件人格式
 from functools import wraps
 
-# 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -37,21 +36,21 @@ def send_email(subject, content):
         logger.warning("未配置邮箱账号密码，跳过发送")
         return
 
-    sender = mail_user
-    receivers = [mail_user]  # 发给自己
-
-    # 构建邮件
-    message = MIMEText(content, 'plain', 'utf-8')
-    message['From'] = Header("AI基金投顾", 'utf-8')
-    message['To'] = Header("我", 'utf-8')
-    message['Subject'] = Header(subject, 'utf-8')
-
     try:
+        # 构建邮件
+        message = MIMEText(content, 'plain', 'utf-8')
+        
+        # 【关键修复】QQ邮箱必须使用这种标准格式： 昵称 <邮箱地址>
+        message['From'] = formataddr(["AI基金投顾", mail_user])
+        message['To'] = formataddr(["我", mail_user])
+        message['Subject'] = subject
+
         # 连接 QQ 邮箱服务器
         smtpObj = smtplib.SMTP_SSL('smtp.qq.com', 465)
         smtpObj.login(mail_user, mail_pass)
-        smtpObj.sendmail(sender, receivers, message.as_string())
+        # 注意：sendmail 的第一个参数 (from) 必须和 login 的账号一致
+        smtpObj.sendmail(mail_user, [mail_user], message.as_string())
         smtpObj.quit()
-        logger.info("邮件发送成功")
-    except smtplib.SMTPException as e:
+        logger.info("邮件发送成功 📧")
+    except Exception as e:
         logger.error(f"无法发送邮件: {e}")
