@@ -7,7 +7,6 @@ from utils import retry, logger
 
 class DataFetcher:
     def __init__(self):
-        # 【关键】从环境变量读取 Token，不写死在代码里
         self.ts_token = os.getenv("TUSHARE_TOKEN")
         self.pro = None
         
@@ -24,22 +23,24 @@ class DataFetcher:
     @retry(retries=3)
     def get_fund_history(self, code):
         """
-        获取日线数据，并自动生成周线数据 (V4.0)
-        返回: {'daily': df, 'weekly': df}
+        获取日线数据，并自动生成周线数据 (V4.1 修复版)
         """
         try:
-            # 1. 获取日线 (使用 Akshare 开放基金接口，适配性最好)
-            # 这里的 indicator="单位净值走势" 可以获取场外基金的历史净值
-            df = ak.fund_open_fund_info_em(fund=code, indicator="单位净值走势")
+            # 【关键修复】参数名从 fund 改为 symbol
+            # 适配 AkShare 新版接口
+            df = ak.fund_open_fund_info_em(symbol=code, indicator="单位净值走势")
             
+            if df is None or df.empty:
+                logger.warning(f"{code} 获取到的数据为空")
+                return {"daily": pd.DataFrame(), "weekly": pd.DataFrame()}
+
             # 清洗数据
             df = df.rename(columns={"净值日期": "date", "单位净值": "close"})
             df['date'] = pd.to_datetime(df['date'])
             df['close'] = pd.to_numeric(df['close'])
             df = df.sort_values('date').set_index('date')
             
-            # 2. 生成周线 (Resample) - Python 预计算省一次 API
-            # 'W' 代表 Weekly
+            # 生成周线 (Resample)
             weekly_df = df.resample('W').agg({'close': 'last'}).dropna()
 
             return {
