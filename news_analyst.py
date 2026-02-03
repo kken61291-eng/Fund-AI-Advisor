@@ -1,3 +1,5 @@
+import requests
+import xml.etree.ElementTree as ET
 import google.generativeai as genai
 import os
 import json
@@ -6,39 +8,71 @@ from utils import retry, logger
 
 class NewsAnalyst:
     def __init__(self):
-        # ... 初始化代码保持不变 (模型优先级列表) ...
-        self.models_priority = ['gemini-1.5-flash', 'gemini-pro'] # 推荐 1.5-flash 处理结构化数据
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key: raise ValueError("未设置 GEMINI_API_KEY")
+        genai.configure(api_key=api_key)
+        # 自动降级策略
+        self.models_priority = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-pro']
 
-    def analyze_fund(self, fund_info, tech_indicators, market_sentiment, news_titles):
+    @retry(retries=3)
+    def fetch_news_titles(self, keyword):
+        """抓取新闻"""
+        if "红利" in keyword: search_q = "中证红利 基金"
+        elif "白酒" in keyword: search_q = "白酒板块 茅台"
+        elif "纳斯达克" in keyword: search_q = "纳斯达克 美股"
+        elif "黄金" in keyword: search_q = "黄金价格 金价"
+        else: search_q = keyword + " 基金"
+
+        url = f"https://news.google.com/rss/search?q={search_q} when:1d&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+        try:
+            response = requests.get(url, timeout=10)
+            root = ET.fromstring(response.content)
+            titles = [item.find('title').text for item in root.findall('.//item')[:6]] # 限制条数省Token
+            return titles
+        except:
+            return []
+
+    def analyze_fund_v4(self, fund_name, tech_data, market_ctx, news_titles):
         """
-        Map 阶段：单只基金分析
+        V4.0 分析引擎：基于预计算指标进行决策
         """
-        # 构建极简的 Prompt (省 Token 神器)
+        if not tech_data:
+            return {"thesis": "数据不足", "action_advice": "观望"}
+
+        news_text = "; ".join(news_titles) if news_titles else "无重大新闻"
+        
+        # 极简 Prompt，Token 消耗极低
         prompt = f"""
-        角色：量化交易员。
-        任务：分析基金【{fund_info['name']}】。
+        角色：量化交易员。标的：{fund_name}。
         
-        【硬数据 (Python已计算)】
-        1. 趋势: 日线{tech_indicators['trend']} | 周线{tech_indicators.get('weekly_trend', 'N/A')} (周线向下时慎做多)
-        2. 动能: RSI={tech_indicators['rsi']} (超卖<30, 超买>70)
-        3. 估值: 溢价率={tech_indicators.get('premium', 0)}% (正为溢价，>3%高危)
+        【硬数据 (Python计算)】
+        1. 价格趋势: 日线{tech_data['trend_daily']} | 周线{tech_data['trend_weekly']} (周线DOWN时慎做多)
+        2. 动能指标: RSI={tech_data['rsi']} (超卖<35, 超买>70)
+        3. 均线乖离: 偏离MA20 {tech_data['bias_20']}%
         
-        【软数据 (舆情)】
-        新闻标题: {str(news_titles)}
-        宏观环境: {market_sentiment}
+        【宏观与舆情】
+        市场风向: {market_ctx.get('north_label','未知')} ({market_ctx.get('north_money',0)}亿)
+        新闻摘要: {news_text}
         
-        请输出 JSON 格式决策：
+        请输出 JSON (Strict JSON):
         {{
-            "signal": "BUY/SELL/HOLD",
-            "position_adjust": "0.0 to 1.0",
-            "reason": "简短理由(50字内)"
+            "thesis": "一句话核心逻辑(含技术+消息)",
+            "pros": "利多因素",
+            "cons": "利空因素",
+            "action_advice": "买入/卖出/观望/强力买入",
+            "risk_warning": "最大风险点"
         }}
         """
-        # ... 调用 API 代码保持不变 ...
 
-    def generate_portfolio_summary(self, all_funds_analysis):
-        """
-        Reduce 阶段：生成总日报
-        """
-        # 将上面每只基金的 JSON 结果拼起来，让 AI 写个总结
-        pass
+        for model_name in self.models_priority:
+            try:
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(prompt)
+                text = response.text.replace('```json', '').replace('```', '').strip()
+                return json.loads(text)
+            except Exception as e:
+                logger.warning(f"模型 {model_name} 失败: {e}")
+                time.sleep(1)
+                continue
+        
+        return {"thesis": "AI服务暂时不可用", "action_advice": "观望", "pros":"", "cons":""}
