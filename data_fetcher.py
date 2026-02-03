@@ -16,21 +16,21 @@ class DataFetcher:
     @retry(retries=3)
     def get_fund_history(self, code):
         """
-        全量获取：尝试场内ETF -> 尝试场外基金 -> 生成日线+真周线
+        V8.0: 专注于 ETF 数据获取
         """
         try:
-            # 1. 优先尝试场内 ETF 接口 (数据更全)
-            try:
-                df = ak.fund_etf_hist_em(symbol=code, period="daily", adjust="qfq")
+            # 直接请求 ETF 接口，不再回退到场外基金，强制要求 config 使用场内代码
+            df = ak.fund_etf_hist_em(symbol=code, period="daily", adjust="qfq")
+            
+            if df is None or df.empty: 
+                # 兼容性：万一用户非要填场外代码，尝试兜底
+                try:
+                    df = ak.fund_open_fund_info_em(symbol=code, indicator="单位净值走势")
+                    df = df.rename(columns={"净值日期": "date", "单位净值": "close"})
+                    df['high'] = df['close']; df['low'] = df['close']; df['open'] = df['close']
+                except: return None
+            else:
                 df = df.rename(columns={"日期": "date", "收盘": "close", "最高": "high", "最低": "low", "开盘": "open"})
-            except:
-                # 2. 回退到场外基金接口
-                df = ak.fund_open_fund_info_em(symbol=code, indicator="单位净值走势")
-                df = df.rename(columns={"净值日期": "date", "单位净值": "close"})
-                df['high'] = df['close']
-                df['low'] = df['close']
-
-            if df is None or df.empty: return None
 
             df['date'] = pd.to_datetime(df['date'])
             df['close'] = pd.to_numeric(df['close'])
@@ -38,7 +38,7 @@ class DataFetcher:
             df['low'] = pd.to_numeric(df['low'])
             df = df.sort_values('date').set_index('date')
             
-            # 3. 生成真周线 (周五聚合)
+            # 真周线
             weekly_df = df.resample('W-FRI').agg({
                 'close': 'last',
                 'high': 'max',
