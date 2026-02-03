@@ -5,7 +5,7 @@ from datetime import datetime
 from data_fetcher import DataFetcher
 from news_analyst import NewsAnalyst
 from market_scanner import MarketScanner
-from technical_analyzer import TechnicalAnalyzer # 新增
+from technical_analyzer import TechnicalAnalyzer
 from utils import send_email, logger
 
 def load_config():
@@ -13,12 +13,6 @@ def load_config():
         return yaml.safe_load(f)
 
 def render_html_report(market_ctx, funds_results):
-    # ... (保持之前的 HTML 渲染逻辑代码，此处省略以节省篇幅，直接用 V3.0 的即可) ...
-    # 唯一要注意的是，res['tech'] 现在包含了 trend_weekly 等新字段，
-    # 但 HTML 模板里直接取 res['tech']['rsi'] 是兼容的。
-    # 为了完整性，建议保留 V3.0 的 render_html_report 函数不动。
-    
-    # 这里复制粘贴 V3.0 的 render_html_report 函数代码
     COLOR_RED = "#d32f2f"
     COLOR_GREEN = "#2e7d32"
     COLOR_GRAY = "#616161"
@@ -37,7 +31,7 @@ def render_html_report(market_ctx, funds_results):
     <body style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: {BG_COLOR}; margin: 0; padding: 20px;">
         <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
             <div style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; padding: 20px; text-align: center;">
-                <h1 style="margin: 0; font-size: 24px;">🚀 AI 深度投顾日报 (V4.0)</h1>
+                <h1 style="margin: 0; font-size: 24px;">🚀 AI 深度投顾日报 (Kimi极速版)</h1>
                 <p style="margin: 5px 0 0; opacity: 0.8; font-size: 14px;">{datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
             </div>
             <div style="padding: 20px; border-bottom: 1px solid #eee;">
@@ -63,7 +57,6 @@ def render_html_report(market_ctx, funds_results):
         elif "卖" in action: card_color = COLOR_GREEN; btn_bg = "#e8f5e9"
         else: card_color = COLOR_GRAY; btn_bg = "#f5f5f5"
 
-        # V4.0 新增展示：周线趋势
         weekly_tag = ""
         if res['tech'].get('trend_weekly') == "DOWN":
             weekly_tag = "<span style='color:green; font-size:10px; margin-left:5px;'>[周线向下]</span>"
@@ -114,7 +107,7 @@ def main():
     try: analyst = NewsAnalyst()
     except Exception as e: logger.error(f"AI初始化失败: {e}")
 
-    logger.info(">>> 启动全市场扫描 (V4.0)...")
+    logger.info(">>> 启动全市场扫描 (V4.1 极速版)...")
     market_ctx = scanner.get_market_sentiment()
     funds_results = []
 
@@ -122,10 +115,10 @@ def main():
         try:
             logger.info(f"=== 分析 {fund['name']} ===")
             
-            # 1. 获取数据 (日线 + 周线)
+            # 1. 获取数据
             data_dict = fetcher.get_fund_history(fund['code'])
             
-            # 2. Python 预计算指标 (省 Token)
+            # 2. Python 预计算指标
             tech_indicators = TechnicalAnalyzer.calculate_indicators(data_dict)
             
             if not tech_indicators:
@@ -155,9 +148,10 @@ def main():
                 "ai": ai_result
             })
 
-            # 5. 冷却防限流
-            logger.info("💤 冷却 15s...")
-            time.sleep(15)
+            # 【关键修改】 15s -> 1s
+            # Kimi 支持 500 RPM，这里只留 1秒 防止 AkShare 接口请求过快被封 IP
+            logger.info("⚡️ 闪电分析完成，短暂休整 1s...")
+            time.sleep(1)
 
         except Exception as e:
             logger.error(f"分析 {fund['name']} 失败: {e}")
@@ -165,7 +159,7 @@ def main():
     if funds_results:
         try:
             html_report = render_html_report(market_ctx, funds_results)
-            send_email("📊 AI 深度投顾日报 (V4.0)", html_report)
+            send_email("📊 AI 深度投顾日报 (Kimi版)", html_report)
         except Exception as e:
             logger.error(f"发送失败: {e}")
 
