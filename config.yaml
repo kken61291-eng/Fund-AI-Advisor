@@ -1,113 +1,32 @@
 # 全局设置
 global:
-  base_invest_amount: 200  # 基础定投金额
-  max_daily_invest: 1000   # 单日上限
-  retry_times: 3
+  base_invest_amount: 200
+  max_daily_invest: 1000
+  tushare_token: "${{ secrets.TUSHARE_TOKEN }}" # 需要在 GitHub Secrets 配置
 
-# 策略参数
+# V4.0 策略参数
 strategy:
-  rsi_buy_threshold: 35    # 超卖线 (低于此值考虑买入)
-  rsi_sell_threshold: 70   # 超买线 (高于此值考虑卖出)
-  sentiment_buy_threshold: 7 # 情绪分门槛
+  # 预测性指标
+  etf_premium_threshold: 0.03   # 溢价率 > 3% 禁止买入
+  etf_discount_threshold: -0.02 # 折价率 < -2% 加倍定投
+  
+  # 多周期共振
+  enable_weekly_filter: true    # 开启周线趋势过滤
+  
+  # 基础指标
+  rsi_buy: 35
+  rsi_sell: 70
 
-# 基金列表
+# 基金池 (混合配置)
 funds:
-  # --- 贵金属/商品 ---
-  - code: "000307"
-    name: "易方达黄金ETF联接A"
-    type: "fund"
-    sector_keyword: "黄金价格"
-
-  # --- 行业主题 (A股) ---
-  - code: "020274"
-    name: "富国中证细分化工产业主题ETF联接C"
-    type: "fund"
-    sector_keyword: "化工行业"
-
-  - code: "001595"
-    name: "天弘中证银行ETF联接C"
-    type: "fund"
-    sector_keyword: "银行板块"
-
-  - code: "004753"
-    name: "广发中证传媒ETF联接C"
-    type: "fund"
-    sector_keyword: "传媒游戏"
-
-  - code: "001717"
-    name: "工银瑞信前沿医疗股票A"
-    type: "fund"
-    sector_keyword: "医药医疗"
-
-  - code: "161725"
-    name: "招商中证白酒指数(LOF)A"
-    type: "fund"
-    sector_keyword: "白酒茅台"
-
-  - code: "012414"
-    name: "招商中证白酒指数C"
-    type: "fund"
-    sector_keyword: "白酒消费"
-
-  - code: "013454"
-    name: "大摩优悦生活混合A"
-    type: "fund"
-    sector_keyword: "大消费"
-    
-  - code: "162201"
-    name: "泰达宏利成长混合"
-    type: "fund"
-    sector_keyword: "成长股"
-
-  # --- 宽基/指数增强 ---
-  - code: "008114"
-    name: "天弘中证红利低波动100ETF联接A"
-    type: "fund"
-    sector_keyword: "红利低波"
-
-  - code: "017555"
-    name: "永赢北证50成份指数A"
-    type: "fund"
-    sector_keyword: "北证50"
-
-  - code: "006532"
-    name: "汇安中证500指数增强C"
-    type: "fund"
-    sector_keyword: "中证500"
-
-  # --- QDII (海外/港股) ---
-  - code: "006479"
-    name: "广发纳斯达克100ETF联接(QDII)C"
-    type: "fund"
-    sector_keyword: "纳斯达克"
-
-  - code: "012349"
-    name: "天弘恒生科技ETF联接(QDII)C"
-    type: "fund"
+  # 示例：跨境ETF (必须监控溢价率)
+  - code: "513180" 
+    name: "恒生科技ETF"
+    type: "etf_cross_border"
     sector_keyword: "恒生科技"
 
-  # --- 混合/策略/其他 ---
-  - code: "163822"
-    name: "中银主题策略混合A"
+  # 示例：A股场外基金
+  - code: "008114"
+    name: "天弘红利低波A"
     type: "fund"
-    sector_keyword: "A股市场"
-
-  - code: "001173"
-    name: "中欧互联互通混合A"
-    type: "fund"
-    sector_keyword: "沪港深互通"
-
-  - code: "007872"
-    name: "金信稳健策略混合A"
-    type: "fund"
-    sector_keyword: "科技半导体" # 该基金持仓偏科技成长
-
-  - code: "004617"
-    name: "东兴未来价值混合C"
-    type: "fund"
-    sector_keyword: "价值投资"
-
-  - code: "004972"
-    name: "长城收益宝货币A"
-    type: "fund"
-    sector_keyword: "货币基金"
+    sector_keyword: "红利低波"
