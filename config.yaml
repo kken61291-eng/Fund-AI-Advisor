@@ -25,7 +25,7 @@ funds:
     sector_keyword: "黄金价格"
 
   # --- 行业主题 (A股) ---
-  - code: "012374"
+  - code: "020274"
     name: "富国中证细分化工产业主题ETF联接C"
     type: "fund"
     sector_keyword: "化工行业"
