@@ -8,9 +8,12 @@ from market_scanner import MarketScanner
 from technical_analyzer import TechnicalAnalyzer
 from utils import send_email, logger
 
-# ... (load_config, render_html_report 保持不变，请复制之前的) ...
-# 为了节省篇幅，这里重点展示修改后的 main 和 逻辑校验函数
+# --- 基础配置加载函数 (补回) ---
+def load_config():
+    with open('config.yaml', 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f)
 
+# --- 逻辑熔断校验 (V5.1 新增) ---
 def logic_check(ai_result, tech_data):
     """
     🛡️ 逻辑熔断器：防止 AI 胡说八道
@@ -34,6 +37,7 @@ def logic_check(ai_result, tech_data):
             
     return ai_result
 
+# --- 仓位计算算法 (V5.0 新增) ---
 def calculate_position(ai_result, base_amount):
     """
     💰 仓位计算 (配合逻辑校验)
@@ -52,6 +56,120 @@ def calculate_position(ai_result, base_amount):
     else:
         return 0, "⚠️ 胜率不足"
 
+# --- HTML 报告渲染 (补回) ---
+def render_html_report(market_ctx, funds_results):
+    COLOR_RED = "#d32f2f"     # 涨/买
+    COLOR_GREEN = "#2e7d32"   # 跌/卖
+    COLOR_BG = "#f5f7fa"      # 极简灰背景
+    
+    # 宏观颜色
+    north_money = market_ctx.get('north_money', "0")
+    try: 
+        check_val = float(str(north_money).replace('%', ''))
+    except: 
+        check_val = 0
+    north_color = COLOR_RED if check_val > 0 else COLOR_GREEN
+    
+    html = f"""
+    <html>
+    <head>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: {COLOR_BG}; margin: 0; padding: 20px; color: #333; }}
+            .container {{ max-width: 650px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); overflow: hidden; }}
+            .header {{ background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%); color: #333; padding: 25px; text-align: center; }}
+            .market-box {{ display: flex; padding: 15px; border-bottom: 1px solid #eee; gap: 10px; }}
+            .card {{ padding: 20px; border-bottom: 1px solid #eee; transition: all 0.2s; }}
+            .card:hover {{ background-color: #fafafa; }}
+            .tag {{ padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }}
+            .buy-tag {{ background: #ffebee; color: {COLOR_RED}; }}
+            .sell-tag {{ background: #e8f5e9; color: {COLOR_GREEN}; }}
+            .wait-tag {{ background: #f5f5f5; color: #999; }}
+            .glossary {{ background: #f8f9fa; padding: 20px; font-size: 13px; color: #666; border-top: 1px solid #eee; }}
+            .glossary h4 {{ margin: 0 0 10px 0; color: #333; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1 style="margin:0; font-size:22px;">💰 AI 绝对收益内参 (V5.1)</h1>
+                <p style="margin:5px 0 0; font-size:13px; opacity:0.8;">{datetime.now().strftime('%Y-%m-%d')} | 逻辑严管版</p>
+            </div>
+            
+            <div class="market-box">
+                <div style="flex:1; background:#fff; border:1px solid #eee; border-radius:8px; padding:10px; text-align:center;">
+                    <div style="font-size:12px; color:#999;">{market_ctx.get('north_label', '宏观')}</div>
+                    <div style="font-size:18px; font-weight:bold; color:{north_color};">{north_money}</div>
+                </div>
+                <div style="flex:2; background:#fff; border:1px solid #eee; border-radius:8px; padding:10px;">
+                    <div style="font-size:12px; color:#999;">🔥 领涨风口</div>
+                    <div style="font-size:13px; color:#333; margin-top:3px;">
+                        {' '.join(market_ctx.get('top_sectors', ['暂无'])[:3])}
+                    </div>
+                </div>
+            </div>
+    """
+
+    all_glossary = {} 
+
+    for res in funds_results:
+        if 'glossary' in res['ai'] and res['ai']['glossary']:
+            all_glossary.update(res['ai']['glossary'])
+
+        action = res['action']
+        amt_display = f"¥{res['amount']}" if res['amount'] > 0 else "0"
+        
+        if res['amount'] > 0:
+            tag_class = "buy-tag"
+            act_text = f"{res['position_type']} {amt_display}"
+        elif "卖" in action:
+            tag_class = "sell-tag"
+            act_text = "🚫 建议卖出"
+        else:
+            tag_class = "wait-tag"
+            act_text = "☕️ 观望等待"
+
+        weekly_trend = res['tech'].get('trend_weekly', 'UNKNOWN')
+        trend_icon = "📈" if weekly_trend == "UP" else "📉"
+        trend_color = COLOR_RED if weekly_trend == "UP" else COLOR_GREEN
+
+        html += f"""
+            <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <div>
+                        <strong style="font-size:16px;">{res['name']}</strong>
+                        <span style="font-size:12px; color:#999; margin-left:5px;">{res['code']}</span>
+                    </div>
+                    <div class="tag {tag_class}">{act_text}</div>
+                </div>
+                
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; font-size:13px; color:#666; margin-bottom:12px;">
+                    <div>RSI: <b style="color:#333">{res['tech']['rsi']}</b></div>
+                    <div>大势: <span style="color:{trend_color}">{trend_icon} {weekly_trend}</span></div>
+                    <div>AI信心: <b style="color:#FF9800">{res['ai'].get('confidence', 0)}/10</b></div>
+                    <div>乖离: {res['tech']['bias_20']}%</div>
+                </div>
+
+                <div style="background:#fff8e1; padding:10px; border-radius:6px; font-size:14px; color:#5d4037; line-height:1.5;">
+                    <b>💡 操盘逻辑:</b> {res['ai']['thesis']}
+                </div>
+                
+                <div style="margin-top:8px; font-size:12px;">
+                    <span style="color:{COLOR_RED}">[利多]</span> {res['ai'].get('pros', '-')} <br>
+                    <span style="color:{COLOR_GREEN}">[风险]</span> {res['ai'].get('risk_warning', '-')}
+                </div>
+            </div>
+        """
+    
+    if all_glossary:
+        html += '<div class="glossary"><h4>📖 操盘手人话词典 (AI生成)</h4>'
+        for term, explain in all_glossary.items():
+            html += f'<p><b>【{term}】</b>: {explain}</p>'
+        html += '</div>'
+
+    html += "</div></body></html>"
+    return html
+
+# --- 主程序 ---
 def main():
     config = load_config()
     fetcher = DataFetcher()
@@ -111,8 +229,6 @@ def main():
             logger.error(f"分析失败: {e}")
 
     if funds_results:
-        # 这里需要你把之前的 render_html_report 函数也放进来，为了代码完整性
-        # (请直接复用 V5.0 的 render_html_report 代码，完全兼容)
         html_report = render_html_report(market_ctx, funds_results)
         send_email("💰 AI 绝对收益内参 (V5.1 重构版)", html_report)
 
