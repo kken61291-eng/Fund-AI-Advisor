@@ -1,12 +1,15 @@
 global:
-  base_invest_amount: 1000  # 单笔基准
+  base_invest_amount: 1000  # 单笔基准 (建议根据总资金量调整，如资金少可设为500)
   max_daily_invest: 5000    # 单日上限
 
 funds:
-  # === 核心底仓 (Core) ===
+  # ==========================================
+  # 🪐 核心资产 (Core) - 全球配置压舱石
+  # 策略：长期持有，穿越牛熊，跌了定投
+  # ==========================================
   - code: "515080"
     name: "红利ETF"
-    sector_keyword: "红利"
+    sector_keyword: "红利 股息"
     strategy_type: "core"
 
   - code: "510300"
@@ -14,64 +17,114 @@ funds:
     sector_keyword: "A股大盘"
     strategy_type: "core"
 
+  - code: "513500"
+    name: "标普500ETF"
+    sector_keyword: "美股大盘 降息"
+    strategy_type: "core"  # 新增：美股核心，比纳指更稳
+
   - code: "518880"
     name: "黄金ETF"
-    sector_keyword: "黄金"
+    sector_keyword: "黄金 避险"
     strategy_type: "core"
 
-  # === 卫星进攻 (Satellite) ===
-  - code: "512690"
-    name: "酒ETF"
-    sector_keyword: "白酒"
+  # ==========================================
+  # 🚀 卫星：硬核科技 (Tech Growth)
+  # 策略：高弹性博弈，严格止盈止损
+  # ==========================================
+  - code: "159941"
+    name: "纳指ETF"
+    sector_keyword: "纳斯达克 科技股"
     strategy_type: "satellite"
 
   - code: "513130"
     name: "恒生科技ETF"
-    sector_keyword: "港股科技"
-    strategy_type: "satellite"
-
-  - code: "159941"
-    name: "纳指ETF"
-    sector_keyword: "纳斯达克"
-    strategy_type: "satellite"
-
-  - code: "516160"
-    name: "化工ETF"
-    sector_keyword: "化工"
-    strategy_type: "satellite"
-
-  - code: "512800"
-    name: "银行ETF"
-    sector_keyword: "银行"
-    strategy_type: "satellite"
-
-  - code: "512980"
-    name: "传媒ETF"
-    sector_keyword: "传媒"
-    strategy_type: "satellite"
-
-  - code: "159992"
-    name: "创新药ETF"
-    sector_keyword: "医药"
-    strategy_type: "satellite"
-
-  - code: "515790"
-    name: "光伏ETF"
-    sector_keyword: "光伏"
-    strategy_type: "satellite"
-
-  # [修复点] 899050 -> 599050 (南方北证50ETF)
-  - code: "599050" 
-    name: "北证50ETF"
-    sector_keyword: "北证"
-    strategy_type: "satellite"
-
-  - code: "512100"
-    name: "中证1000ETF"
-    sector_keyword: "小盘股"
+    sector_keyword: "港股科技 互联网"
     strategy_type: "satellite"
 
   - code: "512480"
     name: "半导体ETF"
-    sector_keyword: "半导体"
+    sector_keyword: "半导体 芯片"
+    strategy_type: "satellite"
+
+  - code: "562500"
+    name: "机器人ETF"
+    sector_keyword: "机器人 人工智能"
+    strategy_type: "satellite" # 新增：AI硬件端
+
+  - code: "515790"
+    name: "光伏ETF"
+    sector_keyword: "光伏 新能源"
+    strategy_type: "satellite"
+
+  - code: "515700"
+    name: "新能源车ETF"
+    sector_keyword: "新能源汽车 锂电池"
+    strategy_type: "satellite" # 新增：补全产业链
+
+  - code: "159992"
+    name: "创新药ETF"
+    sector_keyword: "医药 生物科技"
+    strategy_type: "satellite"
+
+  # ==========================================
+  # 🔄 卫星：周期与金融 (Cyclical & Finance)
+  # 策略：博弈经济复苏与通胀
+  # ==========================================
+  - code: "512690"
+    name: "酒ETF"
+    sector_keyword: "白酒 消费"
+    strategy_type: "satellite"
+
+  - code: "512880"
+    name: "证券ETF"
+    sector_keyword: "券商 牛市旗手"
+    strategy_type: "satellite" # 新增：博弈牛市Beta
+
+  - code: "512800"
+    name: "银行ETF"
+    sector_keyword: "银行 息差"
+    strategy_type: "satellite"
+
+  - code: "515220"
+    name: "煤炭ETF"
+    sector_keyword: "煤炭 能源"
+    strategy_type: "satellite" # 新增：上游资源抗通胀
+
+  - code: "516160"
+    name: "化工ETF"
+    sector_keyword: "化工 材料"
+    strategy_type: "satellite"
+
+  # ==========================================
+  # 🌍 卫星：全球视野与特色 (Global & Special)
+  # 策略：分散国别风险与地缘对冲
+  # ==========================================
+  - code: "513520"
+    name: "日经ETF"
+    sector_keyword: "日本股市"
+    strategy_type: "satellite" # 新增：东亚配置
+
+  - code: "512660"
+    name: "军工ETF"
+    sector_keyword: "军工 国防"
+    strategy_type: "satellite" # 新增：地缘防御
+
+  - code: "516770"
+    name: "游戏动漫ETF"
+    sector_keyword: "游戏 传媒"
+    strategy_type: "satellite" # 新增：高弹性传媒
+
+  - code: "512980"
+    name: "传媒ETF"
+    sector_keyword: "传媒 短剧"
+    strategy_type: "satellite"
+
+  - code: "599050"
+    name: "北证50ETF"
+    sector_keyword: "北证 专精特新"
+    strategy_type: "satellite" # 已修复为场内代码
+
+  - code: "512100"
+    name: "中证1000ETF"
+    sector_keyword: "小盘股"
     strategy_type: "satellite"
