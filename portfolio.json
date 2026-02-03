@@ -24,6 +24,38 @@
             "price": 10.422,
             "date": "2026-02-03",
             "confirm_date": "2026-02-04"
+        },
+        {
+            "code": "515080",
+            "name": "红利ETF",
+            "amount": 500,
+            "price": 1.566,
+            "date": "2026-02-03",
+            "confirm_date": "2026-02-04"
+        },
+        {
+            "code": "510300",
+            "name": "沪深300ETF",
+            "amount": 500,
+            "price": 4.664,
+            "date": "2026-02-03",
+            "confirm_date": "2026-02-04"
+        },
+        {
+            "code": "518880",
+            "name": "黄金ETF",
+            "amount": 500,
+            "price": 10.422,
+            "date": "2026-02-03",
+            "confirm_date": "2026-02-04"
+        },
+        {
+            "code": "513520",
+            "name": "日经ETF",
+            "amount": 500,
+            "price": 1.918,
+            "date": "2026-02-03",
+            "confirm_date": "2026-02-04"
         }
     ]
 }
