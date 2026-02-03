@@ -3,7 +3,14 @@ import logging
 import functools
 import requests
 from requests.exceptions import RequestException, ConnectionError, Timeout
-from urllib3.exceptions import ProtocolError, RemoteDisconnected
+# 🛡️ 修复点：从标准库导入 RemoteDisconnected，不再依赖 urllib3 版本
+from http.client import RemoteDisconnected
+
+# 尝试导入 ProtocolError，如果环境不支持则定义为普通 Exception 避免报错
+try:
+    from urllib3.exceptions import ProtocolError
+except ImportError:
+    class ProtocolError(Exception): pass
 
 # 配置日志
 logging.basicConfig(
@@ -28,19 +35,21 @@ def retry(retries=3, backoff_factor=2):
                     return func(*args, **kwargs)
                 except (RequestException, ConnectionError, Timeout, ProtocolError, RemoteDisconnected, Exception) as e:
                     last_exception = e
+                    # 记录具体的错误类型，方便调试
+                    error_name = type(e).__name__
                     if i < retries:
                         sleep_time = delay * (backoff_factor ** i)
-                        logger.warning(f"⚠️ 接口请求失败: {e}，{sleep_time}秒后重试 ({i+1}/{retries})...")
+                        logger.warning(f"⚠️ {error_name}: 请求失败，{sleep_time}秒后重试 ({i+1}/{retries})...")
                         time.sleep(sleep_time)
                     else:
-                        logger.error(f"❌ 重试耗尽，最终失败: {e}")
+                        logger.error(f"❌ 重试耗尽，最终失败: {error_name} - {e}")
             
             return None 
         return wrapper
     return decorator
 
 def send_email(subject, content):
-    """发送邮件功能 (保持不变)"""
+    """发送邮件功能"""
     import smtplib
     from email.mime.text import MIMEText
     from email.header import Header
@@ -61,6 +70,7 @@ def send_email(subject, content):
         message['To'] = Header("Commander", 'utf-8')
         message['Subject'] = Header(subject, 'utf-8')
 
+        # 尝试连接常见邮箱端口
         try:
             smtp_obj = smtplib.SMTP_SSL('smtp.qq.com', 465)
         except:
