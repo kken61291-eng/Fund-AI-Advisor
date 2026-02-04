@@ -9,21 +9,12 @@ class NewsAnalyst:
     def __init__(self):
         self.api_key = os.getenv("LLM_API_KEY")
         self.base_url = os.getenv("LLM_BASE_URL", "https://api.siliconflow.cn/v1") 
-        
-        # 修正：优先读取环境变量，如果没有设置，才默认回退到 DeepSeek
-        # 这样您在 YAML 里改了 LLM_MODEL，这里就会自动生效
-        self.model_name = os.getenv("LLM_MODEL", "deepseek-ai/DeepSeek-V3") 
-        
-        if self.api_key:
-            self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
-        else:
-            self.client = None
-            logger.warning("未配置 LLM_API_KEY，AI 分析功能将不可用")
+        self.model_name = os.getenv("LLM_MODEL", "Pro/moonshotai/Kimi-K2.5") 
+        self.client = OpenAI(api_key=self.api_key, base_url=self.base_url) if self.api_key else None
 
     @retry(retries=3)
     def fetch_news_titles(self, keyword):
-        """抓取谷歌新闻RSS (全量版逻辑)"""
-        # 针对不同板块优化搜索词，获取更精准的行业催化剂
+        """抓取谷歌新闻RSS (保持 V9 逻辑)"""
         if "红利" in keyword: search_q = "A股 红利指数 股息率"
         elif "白酒" in keyword: search_q = "白酒 茅台 批发价 库存"
         elif "美股" in keyword: search_q = "美联储 降息 纳斯达克"
@@ -31,89 +22,79 @@ class NewsAnalyst:
         elif "医疗" in keyword: search_q = "医药集采 创新药 出海"
         elif "黄金" in keyword: search_q = "黄金价格 避险 美元"
         elif "半导体" in keyword: search_q = "半导体 周期 国产替代"
-        elif "光伏" in keyword: search_q = "光伏 产能 过剩 价格"
-        elif "银行" in keyword: search_q = "银行 息差 坏账"
+        elif "军工" in keyword: search_q = "军工 订单 地缘"
         else: search_q = keyword + " 行业分析"
 
         url = f"https://news.google.com/rss/search?q={search_q} when:2d&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
         try:
             response = requests.get(url, timeout=10)
             root = ET.fromstring(response.content)
-            # 获取前 5 条新闻作为上下文
             titles = [item.find('title').text for item in root.findall('.//item')[:5]]
             return titles
-        except:
-            return []
+        except: return []
 
     def analyze_fund_v4(self, fund_name, tech_data, market_ctx, news_titles):
-        """
-        V9.1 深度分析引擎 (适配 Kimi-K2.5 / DeepSeek)
-        """
-        if not self.client:
-            return {"comment": "AI 未配置", "risk_alert": ""}
+        """(角色1：行业研究员) 针对单个标的的分析"""
+        if not self.client: return {"comment": "AI 未配置", "risk_alert": ""}
 
-        # 整理输入数据
-        score = tech_data['quant_score']
-        rsi = tech_data['rsi']
-        bias = tech_data['bias_20']
-        trend_w = tech_data['trend_weekly']
-        news_str = " | ".join(news_titles) if news_titles else "行业面平静"
-        
-        # 宏观环境
-        macro_sentiment = market_ctx.get('north_label', '震荡')
-        macro_val = market_ctx.get('north_money', '0%')
-
-        # --- Prompt: 针对 Kimi 优化的长逻辑推理 ---
+        # V10 Prompt: 加入 MACD/KDJ/资金流向
         prompt = f"""
-        # Role
-        你是一位拥有20年经验的**首席宏观对冲策略师**。你的特点是：**拒绝废话，只谈逻辑，洞察主力意图**。
-
-        # Market Context
-        - 标的名称: {fund_name}
-        - 宏观环境: {macro_sentiment} ({macro_val})
-        - 行业舆情: {news_str}
-
-        # Quantitative Signals
-        - 综合评分: {score}分 (0-100，>70为机会，<30为风险)
-        - 长期趋势(周线): {trend_w}
-        - 短期动能(RSI): {rsi} (30超卖，70超买)
-        - 乖离率(Bias): {bias}%
+        # Role: 资深行业研究员
+        # Data
+        - 标的: {fund_name}
+        - 评分: {tech_data['quant_score']} (0-100)
+        - 资金流(OBV斜率): {tech_data['flow']['obv_slope']} (正为流入，负为流出)
+        - MACD: {tech_data['macd']['trend']}
+        - KDJ_J值: {tech_data['kdj']['j']} (0超卖, 100超买)
+        - 舆情: {" | ".join(news_titles)}
 
         # Task
-        请根据上述数据，输出一份**高含金量**的微型研报（JSON格式）。
+        输出微型研报 (JSON)。
+        1. comment (60字): 结合资金流向和技术指标，判断主力意图。
+        2. risk_alert (15字): 指出最大风险。
+        """
+        # ... (调用代码与 V9 一致，略微省略以匹配 V10 结构)
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"}, temperature=0.3
+            )
+            return json.loads(response.choices[0].message.content)
+        except: return {"comment": "数据不足", "risk_alert": ""}
 
-        # Requirements
-        1. **comment (核心逻辑)**: 
-           - 限 60 字以内。
-           - **必须包含**：技术面与基本面的共振点（或背离点）。
-           - **关键信息**：主力是在洗盘还是出货？当前是左侧博弈还是右侧跟随？
-           - 风格犀利：不要说"建议关注"，要说"倒车接人机会"或"诱多出货风险"。
-        
-        2. **risk_alert (关键风控)**:
-           - 限 15 字以内。
-           - 指出最致命的一个风险点（如：汇率波动、集采预期、技术破位）。
+    def review_report(self, report_summary):
+        """
+        V10 新增：(角色2：首席投资官 CIO) 
+        从宏观视角审计整份报告，进行独立验证和总结。
+        """
+        if not self.client: return "AI Reviewer Offline."
 
-        # JSON Output Example
-        {{
-            "comment": "周线多头排列下，RSI回落至45属于良性洗盘。叠加美联储降息预期的行业利好，当前缩量回调是机构调仓迹象，建议右侧布局。",
-            "risk_alert": "警惕上方60日线压制"
-        }}
+        prompt = f"""
+        # Role
+        你是华尔街顶级对冲基金的 **CIO (首席投资官)**。你正审阅由量化模型生成的今日交易计划。
+
+        # Report Content
+        {report_summary}
+
+        # Task
+        请以 **顶级专业散户和基金经理** 的双重视角，对这份报告进行 **"独立验证 (Independent Verification)"**。
+        1. **宏观定调**：目前的策略（进攻/防守）是否符合当前的宏观环境？
+        2. **板块点评**：针对报告中提及的重点板块，验证其逻辑是否成立。
+        3. **风险审计**：指出模型可能忽略的致命风险。
+
+        # Output Format (HTML Fragment)
+        请直接输出一段 HTML 代码，包含 `<h3>CIO 独立审计</h3>` 和具体的点评内容。
+        使用 `<p>` 分段，关键结论用 `<strong>` 加粗。语言风格：**毒舌、犀利、客观**。
+        不要客气，如果模型建议买入但市场很差，请直接抨击。
         """
 
         try:
             response = self.client.chat.completions.create(
                 model=self.model_name,
-                messages=[
-                    {"role": "system", "content": "You are a professional financial strategist. Output strictly valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.3 # 保持理性
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.5 # 稍微提高创造性
             )
-            content = response.choices[0].message.content
-            # 清洗可能的 markdown 符号
-            content = content.replace('```json', '').replace('```', '').strip()
-            return json.loads(content)
+            return response.choices[0].message.content
         except Exception as e:
-            logger.error(f"AI 分析失败: {e}")
-            return {"comment": "数据波动，建议结合技术指标观察。", "risk_alert": "市场不确定性"}
+            return f"<p>CIO 审计服务暂时不可用: {e}</p>"
