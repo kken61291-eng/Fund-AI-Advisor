@@ -60,18 +60,18 @@
   ],
   "positions": {
     "515080": {
-      "shares": 630.5293066920786,
-      "avg_cost": 1.585969104665826,
+      "shares": 944.4024912106165,
+      "avg_cost": 1.5883058483646848,
       "first_buy_date": "2026-02-04"
     },
     "510300": {
-      "shares": 214.59231420588225,
-      "avg_cost": 4.659999141630902,
+      "shares": 321.93452133747434,
+      "avg_cost": 4.6593325679031325,
       "first_buy_date": "2026-02-04"
     },
     "518880": {
-      "shares": 92.58499218277849,
-      "avg_cost": 10.800886584575503,
+      "shares": 138.77436944004634,
+      "avg_cost": 10.808912380956873,
       "first_buy_date": "2026-02-04"
     },
     "512480": {
@@ -130,6 +130,21 @@
       "first_buy_date": null
     },
     "512660": {
+      "shares": 0,
+      "avg_cost": 0,
+      "first_buy_date": null
+    },
+    "512800": {
+      "shares": 0,
+      "avg_cost": 0,
+      "first_buy_date": null
+    },
+    "516160": {
+      "shares": 0,
+      "avg_cost": 0,
+      "first_buy_date": null
+    },
+    "512980": {
       "shares": 0,
       "avg_cost": 0,
       "first_buy_date": null
@@ -288,6 +303,102 @@
       "side": "SELL",
       "amount": 0.0,
       "price": 3.267
+    },
+    {
+      "date": "2026-02-04 10:27",
+      "code": "515080",
+      "name": "红利ETF",
+      "side": "BUY",
+      "amount": 500,
+      "price": 1.593
+    },
+    {
+      "date": "2026-02-04 10:28",
+      "code": "510300",
+      "name": "沪深300ETF",
+      "side": "BUY",
+      "amount": 500,
+      "price": 4.658
+    },
+    {
+      "date": "2026-02-04 10:29",
+      "code": "518880",
+      "name": "黄金ETF",
+      "side": "BUY",
+      "amount": 500,
+      "price": 10.825
+    },
+    {
+      "date": "2026-02-04 10:30",
+      "code": "159941",
+      "name": "纳指ETF",
+      "side": "SELL",
+      "amount": 0.0,
+      "price": 1.365
+    },
+    {
+      "date": "2026-02-04 10:30",
+      "code": "513130",
+      "name": "恒生科技ETF",
+      "side": "SELL",
+      "amount": 0.0,
+      "price": 0.692
+    },
+    {
+      "date": "2026-02-04 10:32",
+      "code": "515700",
+      "name": "新能源车ETF",
+      "side": "SELL",
+      "amount": 0.0,
+      "price": 2.439
+    },
+    {
+      "date": "2026-02-04 10:33",
+      "code": "159992",
+      "name": "创新药ETF",
+      "side": "SELL",
+      "amount": 0.0,
+      "price": 0.818
+    },
+    {
+      "date": "2026-02-04 10:33",
+      "code": "512880",
+      "name": "证券ETF",
+      "side": "SELL",
+      "amount": 0.0,
+      "price": 1.18
+    },
+    {
+      "date": "2026-02-04 10:34",
+      "code": "512800",
+      "name": "银行ETF",
+      "side": "SELL",
+      "amount": 0.0,
+      "price": 0.773
+    },
+    {
+      "date": "2026-02-04 10:35",
+      "code": "516160",
+      "name": "化工ETF",
+      "side": "SELL",
+      "amount": 0.0,
+      "price": 3.03
+    },
+    {
+      "date": "2026-02-04 10:36",
+      "code": "512980",
+      "name": "传媒ETF",
+      "side": "SELL",
+      "amount": 0.0,
+      "price": 1.191
+    },
+    {
+      "date": "2026-02-04 10:37",
+      "code": "512100",
+      "name": "中证1000ETF",
+      "side": "SELL",
+      "amount": 0.0,
+      "price": 3.271
     }
   ],
   "signal_record": {
