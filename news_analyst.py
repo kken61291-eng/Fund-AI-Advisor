@@ -28,38 +28,47 @@ class NewsAnalyst:
         except: return []
 
     def analyze_fund_v4(self, fund_name, tech, market_ctx, news):
-        # 保持 V11.0 的逻辑修正层（单标的微观分析）
+        """
+        V11.6 微观审计: 赋予 AI 自由裁量权
+        不再规定具体的扣分数值，而是要求基于"逻辑闭环"进行判断。
+        """
         if not self.client: return {"comment": "AI Offline", "risk_alert": "", "adjustment": 0}
 
         tech_context = f"""
         - 量化基准分: {tech['quant_score']} (0-100)
-        - 周线趋势: {tech['trend_weekly']}
-        - MACD形态: {tech['macd']['trend']}
-        - 资金流向(OBV): {tech['flow']['obv_slope']}
-        - RSI: {tech['rsi']}
+        - 趋势信号: 周线{tech['trend_weekly']}, MACD{tech['macd']['trend']}
+        - 资金信号: OBV斜率 {tech['flow']['obv_slope']} (正流进/负流出)
+        - 情绪信号: RSI {tech['rsi']}
         """
 
         prompt = f"""
-        # Role: 20年经验首席风控官 (Risk Officer)
-        # Data
+        # Role: 资深风控官 (Risk Officer)
+        你是一个多疑的、经验丰富的交易员。你不需要遵守死板的教条，而是要寻找**"故事"中的漏洞**。
+
+        # Context
         - 标的: {fund_name}
-        - 宏观: {str(market_ctx)}
-        - 技术: {tech_context}
-        - 舆情: {str(news)}
-        
-        # Task: 逻辑审计与评分修正
-        你的核心任务是**纠错**。量化模型容易被“缩量诱多”或“技术骗线”愚弄，你需要用经验识别陷阱。
-        
-        # Rules (严厉扣分制)
-        - 严重背离 (价涨量缩 / 价格新高但OBV流出) -> 扣分 (-30 ~ -50)
-        - 宏观冲突 (流动性收紧但高估值资产评分高) -> 扣分 (-20)
-        - 完美形态 (逻辑通顺且共振) -> 不扣分或微调 (+5)
-        
+        - 市场环境: {str(market_ctx)}
+        - 机器打分: {tech_context}
+        - 实时舆情: {str(news)}
+
+        # Your Mission
+        请像一个侦探一样审视上述数据。机器模型只看数字大小，容易被骗。你需要回答：
+        **“当前的上涨（或下跌）逻辑是真实的，还是主力画出来的？”**
+
+        # Thinking Framework (不要机械执行，要思考)
+        1. **量价配合度**：价格涨了，但OBV（真金白银）跟了吗？如果是“无量空涨”，这是危险信号。
+        2. **叙事与现实**：新闻里吹的天花乱坠，但技术面在破位吗？或者反之？
+        3. **宏观共振**：这个标的的走势，符合当前的宏观大背景吗？（例如：降息利好黄金，若黄金跌，则是错杀机会）。
+
         # Output JSON
         {{
-            "comment": "80字以内的犀利点评，指出是否背离，不要废话。",
-            "risk_alert": "20字以内的致命风险点。",
-            "adjustment": (整数, 负数代表扣分)
+            "comment": "80字以内的深度洞察。不要陈述数据，要给出你的**定性判断**（如：诱多、洗盘、抢筹）。",
+            "risk_alert": "20字以内最需要警惕的风险点。",
+            "adjustment": (整数 -100 到 +50) 
+            // 自由裁量权：
+            // 如果你觉得是陷阱，可以重罚 (-40甚至更多)。
+            // 如果你觉得是错杀，可以给予补偿分 (+20)。
+            // 如果机器判断准确，填 0。
         }}
         """
 
@@ -68,7 +77,7 @@ class NewsAnalyst:
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"}, 
-                temperature=0.3
+                temperature=0.4 # 提高一点温度，增加灵活性
             )
             data = json.loads(res.choices[0].message.content)
             if 'adjustment' not in data: data['adjustment'] = 0
@@ -79,87 +88,92 @@ class NewsAnalyst:
 
     def review_report(self, summary):
         """
-        V11.4: CIO 深度战略审计
-        提示词重构：强化上帝视角、逻辑自洽性检查和金融专业度。
+        V11.6 CIO: 辩证思维与战略定力
+        不再做简单的“一致性检查”，而是进行“动态平衡评估”。
         """
         if not self.client: return "<p>CIO Offline</p>"
         
         prompt = f"""
-        # Role Definition
-        你是【鎏金量化基金】的 **首席投资官 (CIO)**。你拥有华尔街20年的宏观对冲经验。
-        你的性格：**冷酷、反人性、精英主义**。你厌恶模棱两可的废话，只做基于逻辑的最终裁决。
+        # Role: 首席投资官 (CIO)
+        你掌管着【鎏金量化基金】的几十亿头寸。你深知市场是非线性的，**并不存在绝对的对错**，只有盈亏比（Risk/Reward Ratio）。
+        
+        # Our Strategy (双轨制)
+        - **核心底仓 (Core)**: 黄金/红利/大盘。任务是**活着**。除非发生系统性崩盘，否则保持在场，不要因为短期波动轻易下车。
+        - **卫星进攻 (Satellite)**: 科技/券商。任务是**掠夺**。必须精准打击，形势不对立即撤退。
 
-        # Context (Market & Plan)
+        # Today's Plan from Quant Team
         {summary}
 
-        # Your Audit Mission (上帝视角审计)
-        请对这份由量化模型（Quant）和初级分析师提交的交易计划进行**严厉的战略审计**：
+        # Your Audit Mission
+        请运用你的直觉和经验，对这份计划进行**辩证评估**：
 
-        1. **宏观一致性检查 (Macro Consistency)**:
-           - 我们的多空方向是否与当前的宏观环境（如流动性收紧/宽松、北向资金流向）冲突？
-           - *如果宏观差但计划激进，必须严厉警告。*
+        1. **审视“模糊地带”**：
+           - 比如：宏观在收紧，但某些板块在逆势走强（抱团）。这可能不是错误，而是**结构性机会**。请指出这种机会是否值得冒险。
+        
+        2. **评估“仓位舒适度”**：
+           - 这份计划执行后，我们的账户是过于激进（睡不着觉）还是过于保守（踏空焦虑）？
+           - 对照我们的双轨制，核心仓位是否够稳？卫星仓位是否够锐？
 
-        2. **风格与轮动审计 (Style & Rotation)**:
-           - 资金是在流向防御资产（红利/黄金/现金）还是进攻资产（科技/成长）？
-           - 这种配置是否符合当前的风险偏好（Risk-on/Risk-off）？
-
-        3. **逻辑自洽性验证 (Logic Check)**:
-           - 检查是否存在“精神分裂”的交易（例如：一边做空纳指防风险，一边梭哈垃圾股）。
+        3. **最终裁决**：
+           - 不要只会说“批准”或“驳回”。请给出**方向性的微调建议**（例如：“科技仓位可以更激进一点，但要把止损线收紧”）。
 
         # Output Requirements (HTML Fragment)
-        请输出一段HTML代码（不含markdown标记），使用**极度专业、金融术语密集**的语言（如：流动性溢价、均值回归、风险敞口、Beta衰减）。
-
-        结构如下：
+        使用极具穿透力的金融语言。
+        结构：
         <div class='cio-seal'>CIO APPROVED</div>
         <h3>CIO 战略审计</h3>
-        <p><strong>宏观定调：</strong>[用一句话定义当前市场阶段，如“流动性陷阱”或“技术性牛市”]</p>
-        <p><strong>板块逻辑：</strong>[点评具体的板块配置逻辑，指出哪些是Alpha，哪些是Beta]</p>
-        <p class='warning'><strong>最终裁决：</strong>[给出最终的战术指令，如“防御优先，现金为王”或“全面进攻”]</p>
+        <p><strong>宏观辩证：</strong>[分析市场的主要矛盾与次要矛盾]</p>
+        <p><strong>双轨评估：</strong>[评价Core与Satellite的配合效率]</p>
+        <p class='warning'><strong>最终裁决：</strong>[给出带有战术细节的指令]</p>
         """
         try:
             res = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.5
+                temperature=0.6 # CIO 需要更高的创造性和大局观
             )
             return res.choices[0].message.content.strip().replace('```html', '').replace('```', '')
         except: return "CIO Audit Failed."
 
     def advisor_review(self, summary, market_ctx):
         """
-        V11.3: 50年经验传奇顾问 (The Sage)
-        专注绝对收益和场外基金建议
+        V11.6 Sage: 博弈论视角与人性洞察
         """
         if not self.client: return ""
 
         prompt = f"""
-        # Role
-        你是一位在市场生存了50年的**传奇民间投资顾问**。你不仅懂ETF，更深知场外基金（Mutual Funds）的坑（如赎回费、T+1确认、偷吃净值）。
-        你的宗旨：**绝对收益，落袋为安**。你说话通俗易懂，像个老大哥。
+        # Role: 50年经验的传奇顾问 (The Sage)
+        你看透了市场的本质是**互为对手盘**。
+        你对场外基金持有者充满同情，因为他们总是因为**T+1的时间差**和**追涨杀跌的人性弱点**而亏损。
 
         # Context
-        宏观: {market_ctx}
-        今日ETF策略:
+        宏观背景: {market_ctx}
+        今日ETF盘面:
         {summary}
 
         # Task
-        请以“老法师”的口吻，给**场外基金持有者**写一段建议。
-        重点关注：
-        1. **时间差风险**：如果ETF大涨，提醒场外现在买进是追高接盘。
-        2. **止盈提醒**：市场不好时，强调现金为王。
-        3. **具体映射**：看到纳指涨，提醒定投QDII的拿住；看到红利涨，提醒债基和红利基的持有者。
+        请给场外基民写一段**“私房话”**。不要打官腔，要像在茶馆里聊天一样透彻。
+        
+        # 思考角度
+        1. **区分“真涨”和“假涨”**：
+           - 如果ETF是缩量上涨，告诉基民：“这可能是主力在画图骗你们进场接盘，别动。”
+           - 如果ETF是放量突破，告诉基民：“这趋势稳了，拿住别下车。”
+        
+        2. **利用“双轨制”心理按摩**：
+           - 告诉持有核心资产（红利/黄金）的人：你们拿着的是金饭碗，别因为一天两天的波动就换成泥饭碗。
+           - 告诉持有进攻资产（科技）的人：这是在刀口舔血，赚了就跑是最高美德。
 
         # Output HTML (无markdown)
         结构:
         <div class='advisor-title'>🎓 传奇顾问独立意见 (50-Year Sage)</div>
-        <p><strong>给场外基民的话：</strong>...</p>
-        <p><strong>绝对收益锦囊：</strong>...</p>
+        <p><strong>给场外基民的私房话：</strong>[通俗、透彻、直击人心]</p>
+        <p><strong>实战锦囊：</strong>[针对不同持有者的具体操作建议]</p>
         """
         try:
             res = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.6 
+                temperature=0.7 # 顾问说话要更有“人味”
             )
             return res.choices[0].message.content.strip().replace('```html', '').replace('```', '')
         except: return "Advisor Offline."
