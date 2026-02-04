@@ -14,6 +14,7 @@ class NewsAnalyst:
 
     @retry(retries=2)
     def fetch_news_titles(self, keyword):
+        # 保持 V11.0 的精准搜索逻辑
         search_q = keyword + " 行业分析"
         if "红利" in keyword: search_q = "A股 红利指数 股息率"
         elif "美股" in keyword: search_q = "美联储 降息 纳斯达克 宏观"
@@ -28,45 +29,34 @@ class NewsAnalyst:
         except: return []
 
     def analyze_fund_v4(self, fund_name, tech, market_ctx, news):
-        """
-        V11.0: AI 逻辑修正层
-        不再只做评论员，而是做裁判员。
-        """
+        # 保持 V11.0 的逻辑修正层不变
         if not self.client: return {"comment": "AI Offline", "risk_alert": "", "adjustment": 0}
 
-        # 详细上下文
         tech_context = f"""
         - 量化基准分: {tech['quant_score']} (0-100)
         - 周线趋势: {tech['trend_weekly']}
         - MACD形态: {tech['macd']['trend']}
-        - 资金流向(OBV): {tech['flow']['obv_slope']} (正为流入，负为流出)
+        - 资金流向(OBV): {tech['flow']['obv_slope']}
         - RSI: {tech['rsi']}
         """
 
         prompt = f"""
-        # Role
-        你是一位拥有20年经验、反人性的**首席风控官**。你的职责是纠正量化模型的盲目乐观。
-
+        # Role: 20年经验首席风控官
         # Data
         - 标的: {fund_name}
-        - 宏观: {market_ctx}
+        - 宏观: {str(market_ctx)}
         - 技术: {tech_context}
         - 舆情: {str(news)}
-
         # Task: 逻辑审计与评分修正
-        量化模型只看价格涨跌，容易被“缩量诱多”或“背离”欺骗。你需要判断是否存在陷阱。
-
-        # Rules for Adjustment (修正分)
-        - 如果 **价格大涨 但 OBV流出/缩量** (量价背离)：必须扣分 (例如 -30 到 -50)。
-        - 如果 **宏观极差(如流动性收紧) 但 标的评分高**：必须扣分 (例如 -20)。
-        - 如果 **形态完美且逻辑通顺**：给 0 分或少量加分 (+5)。
-        - **严厉惩罚**：对于“诱多”形态，不要手软，直接把分数打下来。
-
+        # Rules
+        - 价涨量缩/OBV流出 -> 扣分(-30~-50)
+        - 宏观极差但评分高 -> 扣分(-20)
+        - 形态完美 -> 0或+5
         # Output JSON
         {{
-            "comment": "80字以内的犀利点评，指出是否背离",
-            "risk_alert": "20字以内的致命风险",
-            "adjustment": (整数, 范围 -100 到 +20)
+            "comment": "80字犀利点评",
+            "risk_alert": "20字致命风险",
+            "adjustment": (整数)
         }}
         """
 
@@ -78,7 +68,6 @@ class NewsAnalyst:
                 temperature=0.3
             )
             data = json.loads(res.choices[0].message.content)
-            # 兜底：确保 adjustment 字段存在
             if 'adjustment' not in data: data['adjustment'] = 0
             return data
         except Exception as e:
@@ -94,11 +83,10 @@ class NewsAnalyst:
         {summary}
         # Task
         以“鎏金岁月”的高贵、严谨风格，对今日策略进行最终盖章。
-        请使用专业的金融术语。
-        # Output HTML
+        # Output HTML (无markdown)
         结构:
         <div class='cio-seal'>CIO APPROVED</div>
-        <h3>战略审计报告</h3>
+        <h3>CIO 战略审计</h3>
         <p><strong>宏观定调：</strong>...</p>
         <p><strong>板块逻辑：</strong>...</p>
         <p class='warning'><strong>最终裁决：</strong>...</p>
@@ -109,6 +97,5 @@ class NewsAnalyst:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.5
             )
-            content = res.choices[0].message.content.strip()
-            return content.replace('```html', '').replace('```', '')
+            return res.choices[0].message.content.strip().replace('```html', '').replace('```', '')
         except: return "CIO Audit Failed."
