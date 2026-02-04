@@ -14,17 +14,10 @@ def load_config():
         return yaml.safe_load(f)
 
 def calculate_position_v11(tech_data, ai_adjustment, base_amount, max_daily, pos_info, strategy_type):
-    """
-    V11.0 神经量化融合引擎
-    """
-    # 1. 基础分 (Quant)
+    # --- 逻辑保持 V11.0 标准 ---
     base_score = tech_data['quant_score']
-    
-    # 2. 最终分 (Fusion) = 基础分 + AI修正
-    # 限制最终分在 0-100 之间
     final_score = max(0, min(100, base_score + ai_adjustment))
     
-    # 将最终分写回 tech_data 以便 UI 展示
     tech_data['final_score'] = final_score
     tech_data['ai_adjustment'] = ai_adjustment
 
@@ -36,17 +29,11 @@ def calculate_position_v11(tech_data, ai_adjustment, base_amount, max_daily, pos
     multiplier = 0
     reasons = []
 
-    # 3. 基于最终分的决策逻辑
-    if final_score >= 85: 
-        multiplier = 2.0; reasons.append("极高确信")
-    elif final_score >= 70: 
-        multiplier = 1.0
-    elif final_score >= 60: 
-        multiplier = 0.5
-    elif final_score <= 20: # 稍微放宽卖出阈值，因为AI可能会扣分很狠
-        multiplier = -1.0 
+    if final_score >= 85: multiplier = 2.0; reasons.append("极高确信")
+    elif final_score >= 70: multiplier = 1.0
+    elif final_score >= 60: multiplier = 0.5
+    elif final_score <= 20: multiplier = -1.0 
     
-    # 策略微调 (核心/卫星)
     if is_core:
         if multiplier < 0 and final_score > -40: multiplier = 0 
         if weekly == "UP" and multiplier == 0: multiplier = 0.5
@@ -55,15 +42,12 @@ def calculate_position_v11(tech_data, ai_adjustment, base_amount, max_daily, pos
         cost = pos_info['cost']
         if shares > 0:
             pct = (tech_data['price'] - cost) / cost * 100
-            # 止盈止损逻辑也参考最终分
             if pct > 15 and final_score < 70: multiplier = -0.5 
             if pct < -8 and final_score < 40: multiplier = -1.0 
 
-    # 七日锁
     if multiplier < 0 and shares > 0 and held_days < 7: 
         multiplier = 0; reasons.append(f"锁仓({held_days}天)")
 
-    # 熊市防御
     if weekly == "DOWN":
         if multiplier > 0: multiplier *= 0.5 
         if is_core and multiplier < 0 and final_score > -60: multiplier = 0 
@@ -82,17 +66,26 @@ def calculate_position_v11(tech_data, ai_adjustment, base_amount, max_daily, pos
         sell_value = shares * tech_data['price'] * sell_ratio
         label = "卖出"
 
-    # 记录原因
     if reasons:
         if 'quant_reasons' not in tech_data: tech_data['quant_reasons'] = []
         tech_data['quant_reasons'].extend(reasons)
         
     return final_amount, label, is_sell, sell_value
 
-def render_html_report(market_ctx, funds_results, daily_total_cap, cio_review):
+def render_html_report(macro_news_list, funds_results, daily_total_cap, cio_review):
     """
-    V11.1 UI: 鎏金岁月 (Gilded Age) 主题 - 修复标签清晰度
+    V11.2 UI: 增加多条宏观新闻展示
     """
+    # 渲染宏观新闻列表 HTML
+    macro_html = ""
+    for news in macro_news_list:
+        macro_html += f"""
+        <div style="font-size:11px;color:#bcaaa4;margin-bottom:4px;border-bottom:1px dashed #3e2723;padding-bottom:2px;">
+            <span style="color:#D4AF37;">●</span> {news['title']} 
+            <span style="color:#5d4037;float:right;">[{news['source']}]</span>
+        </div>
+        """
+
     def render_dots(hist):
         h = ""
         for x in hist:
@@ -102,8 +95,6 @@ def render_html_report(market_ctx, funds_results, daily_total_cap, cio_review):
 
     rows = ""
     for r in funds_results:
-        # 配色逻辑：涨红跌绿，但使用更有质感的颜色
-        # 红: #d32f2f (朱砂), 绿: #388e3c (翡翠), 灰: #424242
         if r['amount'] > 0: 
             border_color = "#d32f2f"
             bg_gradient = "linear-gradient(90deg, rgba(60,10,10,0.8) 0%, rgba(30,30,30,0.8) 100%)"
@@ -119,7 +110,6 @@ def render_html_report(market_ctx, funds_results, daily_total_cap, cio_review):
         reasons_list = r['tech'].get('quant_reasons', [])
         reasons = " ".join([f"<span style='border:1px solid #555;padding:0 3px;font-size:9px;border-radius:2px;color:#888;'>{x}</span>" for x in reasons_list])
         
-        # 分数展示逻辑：显示修正过程
         base = r['tech']['quant_score']
         adj = r['tech'].get('ai_adjustment', 0)
         final = r['tech'].get('final_score', base)
@@ -151,19 +141,16 @@ def render_html_report(market_ctx, funds_results, daily_total_cap, cio_review):
                     <div style="font-size:9px;color:#666;">NEURO-SCORE</div>
                 </div>
             </div>
-            
             <div style="display:flex;justify-content:space-between;color:#e0e0e0;font-size:15px;margin-bottom:8px;border-bottom:1px solid #444;padding-bottom:8px;">
                 <span style="font-weight:bold;color:#D4AF37;">{r['position_type']}</span>
                 <span style="font-family:'Courier New',monospace;">{act}</span>
             </div>
-            
             <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:5px;font-size:11px;color:#bdbdbd;font-family:'Courier New',monospace;margin-bottom:8px;">
                 <span>RSI: {r['tech']['rsi']}</span>
                 <span>MACD: {r['tech']['macd']['trend']}</span>
                 <span>OBV: {'流入' if r['tech']['flow']['obv_slope']>0 else '流出'}</span>
                 <span>Wkly: {r['tech']['trend_weekly']}</span>
             </div>
-            
             <div style="margin-bottom:8px;">{reasons}</div>
             <div style="margin-top:5px;">{render_dots(r.get('history',[]))}</div>
             {ai_txt}
@@ -189,23 +176,33 @@ def render_html_report(market_ctx, funds_results, daily_total_cap, cio_review):
             text-shadow: 0 2px 4px rgba(0,0,0,0.8);
         }}
         .subtitle {{ font-size: 11px; color: #8d6e63; margin-top: 8px; letter-spacing: 1px; }}
-        .macro-tag {{ 
-            background: #3e2723; color: #ffccbc; padding: 4px 10px; border-radius: 20px; 
-            font-size: 12px; display: inline-block; margin-top: 10px; border: 1px solid #5d4037;
+        
+        /* 宏观新闻面板 */
+        .macro-panel {{
+            background: rgba(62, 39, 35, 0.3);
+            border: 1px solid #5d4037;
+            border-radius: 4px;
+            padding: 10px;
+            margin-top: 15px;
+            text-align: left;
         }}
+        .macro-title {{
+            font-size: 10px; color: #8d6e63; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1px;
+            border-bottom: 1px solid #5d4037; padding-bottom: 2px;
+        }}
+
         .cio-paper {{ 
             background: #151515; padding: 20px; border: 1px solid #5d4037; border-radius: 4px; 
             margin-bottom: 25px; font-size: 14px; line-height: 1.6; color: #d7ccc8;
             box-shadow: inset 0 0 20px rgba(0,0,0,0.8); position: relative;
         }}
-        /* [修复] 增强 CIO 标签的清晰度 */
         .cio-seal {{
             position: absolute; top: 10px; right: 10px; 
             border: 2px solid #D4AF37; color: #D4AF37;
-            padding: 5px 15px; font-size: 14px; /* 增大字号和内边距 */
+            padding: 5px 15px; font-size: 14px; 
             transform: rotate(-15deg); font-weight: bold; 
-            opacity: 1.0; /* 提高不透明度 */
-            text-shadow: 1px 1px 2px rgba(0,0,0,0.8); /* 增加阴影增强对比 */
+            opacity: 1.0; 
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
             letter-spacing: 1px;
         }}
         .footer {{ text-align: center; font-size: 10px; color: #5d4037; margin-top: 40px; font-family: serif; }}
@@ -214,8 +211,12 @@ def render_html_report(market_ctx, funds_results, daily_total_cap, cio_review):
     <body>
         <div class="header">
             <h1 class="title">GILDED QUANT</h1>
-            <div class="subtitle">V11.1 NEURO-FUSION ENGINE</div>
-            <div class="macro-tag">宏观情绪: {market_ctx.get('north_label')}</div>
+            <div class="subtitle">V11.2 MACRO-RADAR ENGINE</div>
+            
+            <div class="macro-panel">
+                <div class="macro-title">GLOBAL MACRO BRIEF</div>
+                {macro_html}
+            </div>
         </div>
         
         <div class="cio-paper">
@@ -238,16 +239,20 @@ def main():
     scanner = MarketScanner()
     tracker = PortfolioTracker() 
     
-    logger.info(">>> [V11.1] 启动神经量化融合引擎 (UI Fixed)...")
+    logger.info(">>> [V11.2] 启动宏观雷达与CIO审计 (Macro Radar)...")
     tracker.confirm_trades()
     
     try: analyst = NewsAnalyst()
     except: analyst = None
 
-    market_ctx = scanner.get_market_sentiment()
+    # 获取宏观新闻列表 (V11.2 新增)
+    macro_news_list = scanner.get_macro_news()
+    # 将列表转为字符串供 AI 分析使用
+    market_ctx_str = " | ".join([f"{n['title']}" for n in macro_news_list])
+    
     funds_results = []
     
-    cio_summary_lines = [f"市场环境: {market_ctx}"]
+    cio_summary_lines = [f"市场环境: {market_ctx_str}"]
     
     BASE_AMT = config['global']['base_invest_amount']
     MAX_DAILY = config['global']['max_daily_invest']
@@ -263,19 +268,17 @@ def main():
 
             pos = tracker.get_position(fund['code'])
             
-            # --- V11.0 核心改变：先问 AI，再做决策 ---
             ai_adjustment = 0
             ai_res = {}
             
-            # 触发条件
+            # AI 触发条件
             need_ai = (pos['shares'] > 0) or (tech['quant_score'] >= 60) or (tech['quant_score'] <= 35)
             
             if analyst and need_ai:
                 news = analyst.fetch_news_titles(fund['sector_keyword'])
-                ai_res = analyst.analyze_fund_v4(fund['name'], tech, market_ctx, news)
+                ai_res = analyst.analyze_fund_v4(fund['name'], tech, market_ctx_str, news)
                 ai_adjustment = ai_res.get('adjustment', 0)
             
-            # 传入 ai_adjustment 进行最终决策计算
             amt, lbl, is_sell, s_val = calculate_position_v11(
                 tech, ai_adjustment, BASE_AMT, MAX_DAILY, pos, fund.get('strategy_type')
             )
@@ -285,7 +288,6 @@ def main():
             if amt > 0: tracker.add_trade(fund['code'], fund['name'], amt, tech['price'])
             elif is_sell: tracker.add_trade(fund['code'], fund['name'], s_val, tech['price'], True)
 
-            # 汇总给 CIO
             act_str = f"买{amt}" if amt>0 else ("卖" if is_sell else "停")
             cio_summary_lines.append(f"- {fund['name']}: {act_str} (基准:{tech['quant_score']}->修正:{tech['final_score']})")
 
@@ -306,10 +308,10 @@ def main():
         cio_review = analyst.review_report("\n".join(cio_summary_lines))
 
     if funds_results:
-        # 按最终得分排序
         funds_results.sort(key=lambda x: -x['tech'].get('final_score', 0))
-        html = render_html_report(market_ctx, funds_results, MAX_DAILY, cio_review)
-        send_email("🏆 鎏金量化 V11.1 战略内参", html)
+        # 传入 macro_news_list 而不是单行文本
+        html = render_html_report(macro_news_list, funds_results, MAX_DAILY, cio_review)
+        send_email("🏆 鎏金量化 V11.2 战略内参", html)
 
 if __name__ == "__main__":
     main()
