@@ -77,7 +77,7 @@ def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily
     if reasons: tech['quant_reasons'] = reasons
     return final_amt, label, is_sell, sell_val
 
-# [UI 渲染]
+# [UI 渲染 V14.17: 玄铁黑金皮肤]
 def render_html_report_v13(all_news, results, cio_html, advisor_html):
     news_html = ""
     seen_titles = set()
@@ -87,13 +87,12 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             unique_news.append(n)
             seen_titles.add(n['title'])
     
-    # 排序：重磅优先，然后按时间倒序
     unique_news.sort(key=lambda x: (not ('重磅' in x['title'] or '突发' in x['title']), x.get('time', '')), reverse=True)
 
     for i, news in enumerate(unique_news[:15]):
-        color = "#ffb74d" if ('重磅' in news['title'] or '突发' in news['title']) else "#bdbdbd"
+        color = "#ffb74d" if ('重磅' in news['title'] or '突发' in news['title']) else "#999"
         news_html += f"""
-        <div style="font-size:11px;color:#eee;margin-bottom:4px;border-bottom:1px dashed #333;padding-bottom:2px;">
+        <div style="font-size:11px;color:#ccc;margin-bottom:5px;border-bottom:1px dashed #333;padding-bottom:3px;">
             <span style="color:{color};margin-right:4px;">●</span>{news['title']}
             <span style="float:right;color:#666;font-size:10px;">{news.get('time','')}</span>
         </div>
@@ -119,7 +118,6 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             if cro_signal == "VETO": cro_style = "color:#ef5350;font-weight:bold;"
             elif cro_signal == "WARN": cro_style = "color:#ffb74d;font-weight:bold;"
 
-            # [修复] 提取变量，避免 f-string 语法错误
             cro_border_color = '#66bb6a' if cro_signal=='PASS' else '#ef5350'
             obv_text = '流入' if tech.get('flow',{}).get('obv_slope',0) > 0 else '流出'
 
@@ -204,24 +202,43 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
         .title {{ color: #ffb74d; margin: 0; font-size: 32px; font-weight: 800; font-family: 'Times New Roman', serif; letter-spacing: 2px; }}
         .subtitle {{ font-size: 11px; color: #888; margin-top: 8px; text-transform: uppercase; }}
         
-        .radar-panel {{ background: #1a1a1a; border: 1px solid #333; border-radius: 4px; padding: 15px; margin-bottom: 20px; }}
-        .radar-title {{ font-size: 14px; color: #ffb74d; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #444; padding-bottom: 5px; }}
+        .radar-panel {{ background: #111; border: 1px solid #333; border-radius: 4px; padding: 15px; margin-bottom: 25px; }}
+        .radar-title {{ font-size: 14px; color: #ffb74d; font-weight: bold; margin-bottom: 12px; border-bottom: 1px solid #444; padding-bottom: 6px; letter-spacing: 1px; }}
 
-        .cio-section, .advisor-section {{ background: #111; border: 1px solid #333; border-left: 4px solid #5d4037; padding: 20px; margin-bottom: 20px; border-radius: 2px; }}
-        .cio-section {{ border-left-color: #d32f2f; }}
-        .advisor-section {{ border-left-color: #ffb74d; }}
+        /* CIO 红色警报风格 */
+        .cio-section {{ 
+            background: linear-gradient(145deg, #1a0505, #2b0b0b); 
+            border: 1px solid #5c1818; 
+            border-left: 4px solid #d32f2f; 
+            padding: 20px; 
+            margin-bottom: 20px; 
+            border-radius: 2px; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }}
         
-        .section-title {{ font-size: 16px; font-weight: bold; margin-bottom: 15px; color: #eee; text-transform: uppercase; letter-spacing: 1px; }}
+        /* 玄铁先生 黑金流光风格 (High Contrast) */
+        .advisor-section {{ 
+            background: linear-gradient(145deg, #1a1a1a, #262626); 
+            border: 1px solid #d4af37; /* 土豪金边框 */
+            border-left: 4px solid #ffd700; 
+            padding: 20px; 
+            margin-bottom: 30px; 
+            border-radius: 4px; 
+            box-shadow: 0 0 15px rgba(212, 175, 55, 0.15); /* 金色微光 */
+            position: relative;
+        }}
+        
+        .section-title {{ font-size: 16px; font-weight: bold; margin-bottom: 15px; color: #eee; text-transform: uppercase; letter-spacing: 1px; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }}
         .footer {{ text-align: center; font-size: 10px; color: #444; margin-top: 40px; }}
     </style></head><body>
         <div class="main-container">
             <div class="header">
                 <h1 class="title">XUANTIE QUANT</h1>
-                <div class="subtitle">HEAVY SWORD, NO EDGE | V14.16 FINAL</div>
+                <div class="subtitle">HEAVY SWORD, NO EDGE | V14.17 BLACK GOLD</div>
             </div>
             
             <div class="radar-panel">
-                <div class="radar-title">📡 全景情报雷达 (AI Vision)</div>
+                <div class="radar-title">📡 7x24 GLOBAL LIVE WIRE</div>
                 {news_html}
             </div>
 
@@ -231,12 +248,12 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             </div>
 
             <div class="advisor-section">
-                <div class="section-title">🗡️ 玄铁先生·实战复盘</div>
-                {advisor_html}
+                <div class="section-title" style="color: #ffd700;">🗡️ 玄铁先生·场外实战复盘</div>
+                <div style="font-family: 'KaiTi', serif; line-height: 1.6;">{advisor_html}</div>
             </div>
 
             {rows}
-            <div class="footer">EST. 2026 | POWERED BY CAILIAN & JINSHI DATA</div>
+            <div class="footer">EST. 2026 | POWERED BY EM EASTMONEY LIVE</div>
         </div>
     </body></html>"""
 
@@ -312,7 +329,7 @@ def main():
     tracker = PortfolioTracker()
     val_engine = ValuationEngine()
     
-    logger.info(">>> [V14.16] 启动玄铁量化 (Syntax Fix)...")
+    logger.info(">>> [V14.17] 启动玄铁量化 (Black Gold UI + Live Wire)...")
     tracker.confirm_trades()
     try: analyst = NewsAnalyst()
     except: analyst = None
@@ -350,6 +367,6 @@ def main():
         advisor_html = analyst.advisor_review(full_report, macro_str) if analyst else "<p>玄铁先生闭关中</p>"
         
         html = render_html_report_v13(all_news_seen, results, cio_html, advisor_html) 
-        send_email("🗡️ 玄铁量化 V14.16 最终决议", html)
+        send_email("🗡️ 玄铁量化 V14.17 最终决议", html)
 
 if __name__ == "__main__": main()
