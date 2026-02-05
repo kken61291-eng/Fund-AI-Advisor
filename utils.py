@@ -13,16 +13,14 @@ def get_beijing_time():
     beijing_time = utc_now + timedelta(hours=8)
     return beijing_time
 
-# 自定义日志格式器，使用北京时间
+# 自定义日志格式器
 class BeijingFormatter(logging.Formatter):
     def formatTime(self, record, datefmt=None):
         utc_dt = datetime.fromtimestamp(record.created, timezone.utc)
         bj_dt = utc_dt + timedelta(hours=8)
-        if datefmt:
-            return bj_dt.strftime(datefmt)
+        if datefmt: return bj_dt.strftime(datefmt)
         return bj_dt.strftime('%Y-%m-%d %H:%M:%S')
 
-# 配置日志
 handler = logging.StreamHandler()
 handler.setFormatter(BeijingFormatter(
     fmt='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
@@ -30,15 +28,10 @@ handler.setFormatter(BeijingFormatter(
 
 logger = logging.getLogger("FundAdvisor")
 logger.setLevel(logging.INFO)
-# 清除旧 handler 防止重复打印
-if logger.hasHandlers():
-    logger.handlers.clear()
+if logger.hasHandlers(): logger.handlers.clear()
 logger.addHandler(handler)
 
 def retry(retries=3, delay=1):
-    """
-    通用重试装饰器 (参数: delay)
-    """
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -57,16 +50,12 @@ def retry(retries=3, delay=1):
                         time.sleep(wait_time)
                     else:
                         logger.error(f"❌ [{func.__name__}] 彻底失败: {e}")
-                        # 不抛出异常，返回 None，保证主线程不崩
                         return None 
             return None
         return wrapper
     return decorator
 
 def send_email(subject, content):
-    """
-    发送邮件通知
-    """
     sender = os.getenv("MAIL_USER")
     password = os.getenv("MAIL_PASS")
     
@@ -79,7 +68,6 @@ def send_email(subject, content):
     message['From'] = f"Fund Advisor <{sender}>"
     message['To'] = receiver
     
-    # [修复] 邮件标题增加北京时间，方便归档
     bj_time_str = get_beijing_time().strftime("%m-%d %H:%M")
     message['Subject'] = Header(f"[{bj_time_str}] {subject}", 'utf-8')
 
