@@ -9,8 +9,9 @@ class MarketScanner:
         pass
 
     def _format_time(self, time_str):
-        """统一时间格式为 MM-DD HH:MM"""
+        """统一时间格式"""
         try:
+            # 东财直播流的时间通常是 "2026-02-05 14:30:00"
             dt = datetime.strptime(str(time_str), "%Y-%m-%d %H:%M:%S")
             return dt.strftime("%m-%d %H:%M")
         except:
@@ -21,82 +22,61 @@ class MarketScanner:
     @retry(retries=2, delay=2) 
     def get_macro_news(self):
         """
-        获取全市场重磅新闻 (V14.15 天网雷达版 - 50+ 核心词库)
+        获取全球 7x24小时 直播快讯 (替代财联社电报)
         """
         news_list = []
         try:
-            df = ak.stock_news_em(symbol="要闻")
+            # [核心升级] 改用全球财经直播流 (最快讯源)
+            df = ak.stock_info_global_ems()
             
-            title_col = 'title'
-            if 'title' not in df.columns:
-                if '新闻标题' in df.columns: title_col = '新闻标题'
-                elif '文章标题' in df.columns: title_col = '文章标题'
+            # 这里的列名通常是 '发布时间', '内容', '标题'
+            # 内容往往比标题更丰富，我们优先看内容
             
-            time_col = 'public_time'
-            if 'public_time' not in df.columns:
-                if '发布时间' in df.columns: time_col = '发布时间'
-                elif 'time' in df.columns: time_col = 'time'
-
-            # --- V14.15 扩充词库 (The Skynet Keywords) ---
+            # 关键词库 (保持 V14.15 的天网配置)
             keywords = [
-                # 1. 顶层设计 & 权威部门
-                "中共中央", "政治局", "国务院", "发改委", "财政部", "国资委", "证监会", "央行", "外管局", "新华社", "新闻联播",
-                
-                # 2. 货币与财政 (水龙头)
-                "加息", "降息", "降准", "LPR", "MLF", "逆回购", "社融", "M2", "信贷", "特别国债", "赤字率", "流动性",
-                
-                # 3. 核心经济数据 (体温计)
-                "GDP", "CPI", "PPI", "PMI", "非农", "失业率", "通胀", "零售", "出口", "汇率", "人民币",
-                
-                # 4. 市场制度 & 改革 (游戏规则)
-                "印花税", "T+0", "停牌", "注册制", "退市", "做空", "融券", "量化限制", "市值管理", "分红", "回购",
-                
-                # 5. 主力动向 (资金流)
-                "汇金", "证金", "社保基金", "大基金", "北向", "外资", "增持", "举牌", "平准基金",
-                
-                # 6. 突发 & 风险 (黑天鹅)
-                "突发", "重磅", "立案", "调查", "违约", "破产", "战争", "制裁", "地缘", "暴雷"
+                "中共中央", "政治局", "国务院", "证监会", "央行", "新华社",
+                "加息", "降息", "降准", "LPR", "社融", "M2", "信贷", "流动性",
+                "GDP", "CPI", "PPI", "PMI", "非农", "汇率", "人民币",
+                "印花税", "T+0", "注册制", "做空", "市值管理", "回购",
+                "汇金", "证金", "社保", "大基金", "北向", "外资",
+                "突发", "重磅", "立案", "违约", "战争", "地缘"
             ]
             
-            # 垃圾词过滤
-            junk_words = ["汇总", "集锦", "回顾", "收评", "早报", "晚报", "盘前", "要闻精选", "公告一览", "涨停分析", "复盘"]
+            # 垃圾词 (直播流里会有很多无用行情播报)
+            junk_words = ["报", "美元", "现货", "期货", "日内", "新高", "新低", "行情"] 
 
+            count = 0
             for _, row in df.iterrows():
-                title = str(row.get(title_col, ''))
-                raw_time = str(row.get(time_col, ''))
+                content = str(row.get('内容', ''))
+                title = str(row.get('标题', ''))
+                pub_time = str(row.get('发布时间', ''))
                 
-                if not title or title == 'nan': continue
-                if any(jw in title for jw in junk_words): continue
+                # 如果标题为空，用内容的前50个字代替
+                display_text = title if title and title != 'nan' else content
+                if not display_text: continue
                 
-                clean_time = self._format_time(raw_time)
+                # 清洗 HTML 标签
+                display_text = re.sub(r'<[^>]+>', '', display_text).strip()
                 
-                if any(k in title for k in keywords):
+                # 过滤垃圾
+                if any(jw in display_text for jw in junk_words): continue
+                
+                # 匹配关键词
+                if any(k in display_text for k in keywords):
                     news_list.append({
-                        "title": title.strip(),
-                        "source": "全球快讯",
-                        "time": clean_time
+                        "title": display_text[:60] + ("..." if len(display_text)>60 else ""), # 控制长度
+                        "source": "全球7x24",
+                        "time": self._format_time(pub_time)
                     })
-            
-            # 智能补全: 如果筛选后太少，放宽限制补充几条
-            if len(news_list) < 5:
-                for _, row in df.iterrows():
-                    title = str(row.get(title_col, ''))
-                    raw_time = str(row.get(time_col, ''))
-                    if any(jw in title for jw in junk_words): continue
-                    if any(n['title'] == title for n in news_list): continue
-                    
-                    news_list.append({
-                        "title": title.strip(), 
-                        "source": "市场资讯", 
-                        "time": self._format_time(raw_time)
-                    })
-                    if len(news_list) >= 10: break
+                    count += 1
+                    if count >= 10: break # 取前10条最热乎的
 
             return news_list
             
         except Exception as e:
-            logger.warning(f"宏观新闻获取微瑕: {e}")
-            return [{"title": "数据源波动，关注盘面资金。", "source": "系统", "time": datetime.now().strftime("%m-%d %H:%M")}]
+            logger.warning(f"快讯获取微瑕: {e}")
+            # 兜底返回一条系统消息
+            return [{"title": "实时数据链路重连中，请关注静态盘面。", "source": "系统", "time": datetime.now().strftime("%m-%d %H:%M")}]
 
     def get_sector_news(self, keyword):
         return []
