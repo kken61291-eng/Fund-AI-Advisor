@@ -1,111 +1,142 @@
-import requests
-import xml.etree.ElementTree as ET
-from datetime import datetime
-from email.utils import parsedate_to_datetime
+import akshare as ak
+import pandas as pd
+from datetime import datetime, timedelta
 from utils import retry, logger
 
 class MarketScanner:
     def __init__(self):
         pass
 
-    def _parse_pub_date(self, pub_date_str):
+    def _parse_cls_time(self, time_str):
         """
-        解析时间并返回 datetime 对象（无时区）
+        解析财联社时间 (格式通常为 HH:MM)
+        需要补全为今天的日期
         """
         try:
-            if not pub_date_str: return None
-            # 解析 RFC 822 格式
-            pub_dt = parsedate_to_datetime(pub_date_str)
-            # 移除时区以便比较
-            if pub_dt.tzinfo:
-                pub_dt = pub_dt.replace(tzinfo=None)
-            return pub_dt
-        except:
-            return None
+            now = datetime.now()
+            # 财联社只给 HH:MM，默认为当天
+            t = datetime.strptime(time_str, "%H:%M")
+            return now.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
+        except: return datetime.now()
 
-    def _format_source_label(self, source, pub_dt):
+    @retry(retries=1)
+    def _get_cailian_press(self):
         """
-        根据新闻的新旧程度，动态生成来源标签
+        [源1] 财联社电报 - A股短线情绪的核心
+        替代雪球/同花顺，这是它们的上游数据源
         """
-        now = datetime.now()
-        delta = now - pub_dt
-        days = delta.days
-
-        if days < 1:
-            # 24小时内：不加后缀，保持清爽
-            return source
-        elif days < 30:
-            # 1个月内：显示天数
-            return f"{source} · {days}天前"
-        elif days < 365:
-            # 1年内：显示月份
-            return f"{source} · {pub_dt.strftime('%m-%d')}"
-        else:
-            # 远古新闻：显示年份
-            return f"{source} · {pub_dt.strftime('%Y-%m')}"
-
-    @retry(retries=2)
-    def get_macro_news(self):
-        """
-        V11.11 无限溯源：
-        获取所有可用新闻 -> 按时间倒序排列 -> 取前5条 -> 动态标记旧闻
-        """
-        # 移除所有时间限制参数，让 Google 返回库里有的所有相关新闻
-        url = "https://news.google.com/rss/search?q=A股+中国央行+美联储+财政部+宏观经济&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
-        
-        candidates = []
-        
         try:
-            response = requests.get(url, timeout=15) # 稍微增加超时时间
-            root = ET.fromstring(response.content)
-            
-            # 1. 抓取所有条目
-            for item in root.findall('.//item'):
-                title_full = item.find('title').text
-                pub_date_str = item.find('pubDate').text
-                pub_dt = self._parse_pub_date(pub_date_str)
+            # 获取财联社电报
+            df = ak.stock_telegraph_cls(symbol="全部")
+            # 数据清洗
+            news_list = []
+            for _, row in df.iterrows():
+                # 只要最近 24 小时内的
+                pub_time = f"{row['日期']} {row['时间']}"
+                pub_dt = datetime.strptime(pub_time, "%Y-%m-%d %H:%M")
                 
-                if not pub_dt: continue
+                if datetime.now() - pub_dt > timedelta(hours=24):
+                    continue
 
-                # 处理标题和来源
-                if ' - ' in title_full:
-                    title, source = title_full.rsplit(' - ', 1)
-                else:
-                    title = title_full
-                    source = "快讯"
+                content = row['内容']
+                # 简化内容：如果是长文，只取第一句或标题
+                title = row['标题'] if row['标题'] else content[:40] + "..."
                 
-                candidates.append({
+                news_list.append({
                     "title": title,
-                    "source": source,
+                    "source": "财联社·电报",
                     "pub_dt": pub_dt
                 })
-                
+            return news_list[:10] # 取前10条备选
         except Exception as e:
-            logger.error(f"RSS获取失败: {e}")
-            return [{"title": "宏观数据源连接中断", "source": "System Error"}]
+            logger.warning(f"财联社源获取失败: {e}")
+            return []
 
-        # 2. 核心逻辑：按时间倒序排列 (最新的在前)
-        # 这样即使 Google 返回乱序，我们也能拿到相对最新的
-        candidates.sort(key=lambda x: x['pub_dt'], reverse=True)
+    @retry(retries=1)
+    def _get_eastmoney_news(self):
+        """
+        [源2] 东方财富 - 全球财经快讯
+        用于补充宏观视角
+        """
+        try:
+            # 东方财富-全球财经快讯
+            df = ak.stock_info_global_cls(symbol="全部")
+            news_list = []
+            for _, row in df.iterrows():
+                pub_time = f"{row['发布日期']} {row['发布时间']}"
+                pub_dt = datetime.strptime(pub_time, "%Y-%m-%d %H:%M:%S")
 
-        # 3. 截取前 5 条 (如果没有新闻，candidates 为空)
-        final_list = candidates[:5]
+                if datetime.now() - pub_dt > timedelta(hours=24):
+                    continue
+                
+                news_list.append({
+                    "title": row['标题'],
+                    "source": "东财·快讯",
+                    "pub_dt": pub_dt
+                })
+            return news_list[:10]
+        except Exception as e:
+            logger.warning(f"东方财富源获取失败: {e}")
+            return []
 
-        # 4. 兜底逻辑：真的连一年前的新闻都没有吗？
+    def get_macro_news(self):
+        """
+        V12.0 全视之眼：多源聚合 + 实时热点
+        """
+        logger.info("正在连接 财联社 & 东方财富 实时数据终端...")
+        
+        # 1. 并行获取多源数据
+        cls_news = self._get_cailian_press()
+        em_news = self._get_eastmoney_news()
+        
+        # 2. 合并数据池
+        all_news = cls_news + em_news
+        
+        # 3. 按时间倒序排列 (最新的在最前)
+        all_news.sort(key=lambda x: x['pub_dt'], reverse=True)
+        
+        # 4. 智能筛选 (去重 + 关键词加权)
+        final_list = []
+        seen_titles = set()
+        
+        # 关键词加权：优先展示包含这些词的新闻
+        keywords = ["央行", "美联储", "降息", "GDP", "CPI", "牛市", "暴跌", "成交额", "北向"]
+        
+        # 先挑有关键词的
+        for news in all_news:
+            if len(final_list) >= 3: break
+            if any(k in news['title'] for k in keywords) and news['title'] not in seen_titles:
+                final_list.append(news)
+                seen_titles.add(news['title'])
+        
+        # 再填补剩下的空位
+        for news in all_news:
+            if len(final_list) >= 5: break
+            if news['title'] not in seen_titles:
+                final_list.append(news)
+                seen_titles.add(news['title'])
+        
+        # 5. 格式化输出 (计算 'x小时前')
+        output = []
         if not final_list:
-            return [{"title": "全网静默 (数据源无任何历史记录)", "source": "System Watch"}]
+             return [{"title": "全网情报静默 (API连接异常或无重大消息)", "source": "System Watch"}]
 
-        # 5. 格式化输出
-        formatted_news = []
         for news in final_list:
-            # 生成带时间戳的来源标签
-            new_source = self._format_source_label(news['source'], news['pub_dt'])
-            formatted_news.append({
+            delta = datetime.now() - news['pub_dt']
+            
+            if delta.seconds < 3600:
+                time_label = f"{int(delta.seconds/60)}分钟前"
+            elif delta.days < 1:
+                time_label = f"{int(delta.seconds/3600)}小时前"
+            else:
+                time_label = "1天前"
+            
+            output.append({
                 "title": news['title'],
-                "source": new_source
+                "source": f"{news['source']} [{time_label}]"
             })
             
-        return formatted_news
+        return output
 
     def get_market_sentiment(self):
         news = self.get_macro_news()
