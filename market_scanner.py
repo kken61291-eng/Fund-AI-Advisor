@@ -11,7 +11,6 @@ class MarketScanner:
     def _format_time(self, time_str):
         """统一时间格式为 MM-DD HH:MM"""
         try:
-            # 尝试解析完整时间 YYYY-MM-DD HH:MM:SS
             dt = datetime.strptime(str(time_str), "%Y-%m-%d %H:%M:%S")
             return dt.strftime("%m-%d %H:%M")
         except:
@@ -22,11 +21,11 @@ class MarketScanner:
     @retry(retries=2, delay=2) 
     def get_macro_news(self):
         """
-        获取全市场重磅新闻 (V14.18 稳健版 - 回退至要闻接口，保留天网逻辑)
+        获取全市场重磅新闻 (V14.19 智能兜底版)
+        逻辑：关键词检索(OR) -> 如果无结果 -> 启动备选(Top N)
         """
         news_list = []
         try:
-            # [回退] 使用最稳定的要闻接口，避免 Attribute Error
             df = ak.stock_news_em(symbol="要闻")
             
             title_col = 'title'
@@ -39,7 +38,7 @@ class MarketScanner:
                 if '发布时间' in df.columns: time_col = '发布时间'
                 elif 'time' in df.columns: time_col = 'time'
 
-            # V14.17 的天网关键词库
+            # 天网关键词 (OR 关系: 只要命中一个就被捕获)
             keywords = [
                 "中共中央", "政治局", "国务院", "发改委", "财政部", "国资委", "证监会", "央行", "外管局", "新华社",
                 "加息", "降息", "降准", "LPR", "MLF", "逆回购", "社融", "M2", "信贷", "特别国债", "赤字率", "流动性",
@@ -49,9 +48,9 @@ class MarketScanner:
                 "突发", "重磅", "立案", "调查", "违约", "破产", "战争", "制裁", "地缘", "暴雷"
             ]
             
-            # 垃圾词过滤
             junk_words = ["汇总", "集锦", "回顾", "收评", "早报", "晚报", "盘前", "要闻精选", "公告一览", "涨停分析", "复盘"]
 
+            # --- 第一轮：关键词精准检索 (Priority) ---
             for _, row in df.iterrows():
                 title = str(row.get(title_col, ''))
                 raw_time = str(row.get(time_col, ''))
@@ -61,27 +60,32 @@ class MarketScanner:
                 
                 clean_time = self._format_time(raw_time)
                 
+                # OR 关系：只要包含任意一个关键词
                 if any(k in title for k in keywords):
                     news_list.append({
                         "title": title.strip(),
                         "source": "全球快讯",
                         "time": clean_time
                     })
-            
-            # 兜底补充
-            if len(news_list) < 5:
+
+            # --- 第二轮：备选兜底 (Fallback) ---
+            # 如果关键词一个都没查出来 (len == 0)，则启动备选方案
+            if len(news_list) == 0:
+                logger.info("📡 天网关键词未命中，启动备选兜底模式...")
                 for _, row in df.iterrows():
                     title = str(row.get(title_col, ''))
                     raw_time = str(row.get(time_col, ''))
-                    if any(jw in title for jw in junk_words): continue
-                    if any(n['title'] == title for n in news_list): continue
                     
+                    if not title or title == 'nan': continue
+                    if any(jw in title for jw in junk_words): continue
+                    
+                    # 备选：不管有没有关键词，只要不是垃圾词，都抓进来
                     news_list.append({
                         "title": title.strip(), 
                         "source": "市场资讯", 
                         "time": self._format_time(raw_time)
                     })
-                    if len(news_list) >= 10: break
+                    if len(news_list) >= 5: break # 备选抓5条就够了
 
             return news_list
             
