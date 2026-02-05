@@ -20,34 +20,25 @@ class NewsAnalyst:
     @retry(retries=2, delay=2)
     def fetch_news_titles(self, keyword):
         """
-        [修复] 恢复行业新闻抓取能力 (改用东财源)
+        [修复] 行业新闻抓取 (使用东财要闻+本地过滤)
         """
         if not keyword: return []
         
         news_list = []
         try:
-            # 尝试1: 东方财富个股/板块新闻
-            # 搜索策略：直接搜关键词可能没有API，我们使用"要闻"接口然后本地过滤
+            # [修复] 统一使用 stock_news_em
             df = ak.stock_news_em(symbol="要闻")
             
             keys = keyword.split()
             
             for _, row in df.iterrows():
                 title = str(row.get('title', ''))
-                # 东财只有title, content, public_time
+                # 只要标题包含任意关键词
                 if any(k in title for k in keys):
                     news_list.append(f"[{row.get('public_time','')[-5:]}] {title}")
             
-            # 如果没抓到，尝试备用源：全球快讯
             if not news_list:
-                df_global = ak.stock_info_global_ems()
-                for _, row in df_global.iterrows():
-                    content = str(row.get('content', ''))
-                    if any(k in content for k in keys):
-                        news_list.append(f"[快讯] {content[:60]}...")
-
-            if not news_list:
-                return [f"近期无'{keyword}'直接相关资讯，建议关注盘面资金流向。"]
+                return [f"近期无'{keyword}'直接相关资讯，需参考宏观大势。"]
                 
             return news_list[:5] 
             
@@ -66,9 +57,7 @@ class NewsAnalyst:
 
     @retry(retries=2, delay=2)
     def analyze_fund_v4(self, fund_name, tech_indicators, macro_summary, sector_news):
-        # ... (投委会 Prompt 逻辑保持不变，为节省篇幅省略，请复用 V14.1 的逻辑) ...
-        # 请务必保留之前带有 "投委会最高宪章" 的 Prompt 代码
-        
+        # 提取关键数据
         score = tech_indicators.get('quant_score', 50)
         trend = tech_indicators.get('trend_weekly', '无趋势')
         valuation = tech_indicators.get('valuation_desc', '未知')
@@ -128,7 +117,8 @@ class NewsAnalyst:
         }
         
         try:
-            response = requests.post(f"{self.base_url}/chat/completions", headers=self.headers, json=payload, timeout=45)
+            # [修复] 超时时间增加到 90秒
+            response = requests.post(f"{self.base_url}/chat/completions", headers=self.headers, json=payload, timeout=90)
             if response.status_code != 200: return self._fallback_result()
             data = json.loads(self._clean_json(response.json()['choices'][0]['message']['content']))
             return {
