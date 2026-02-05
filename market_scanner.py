@@ -1,142 +1,218 @@
 import akshare as ak
+import requests
 import pandas as pd
+import time
+import random
 from datetime import datetime, timedelta
 from utils import retry, logger
 
 class MarketScanner:
     def __init__(self):
-        pass
+        # 伪装成浏览器，防止被反爬
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://www.cls.cn/"
+        }
 
-    def _parse_cls_time(self, time_str):
+    def _parse_time(self, time_val):
         """
-        解析财联社时间 (格式通常为 HH:MM)
-        需要补全为今天的日期
+        通用时间解析器
         """
         try:
             now = datetime.now()
-            # 财联社只给 HH:MM，默认为当天
-            t = datetime.strptime(time_str, "%H:%M")
-            return now.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
+            # 1. 时间戳 (10位或13位)
+            if isinstance(time_val, (int, float)):
+                if time_val > 10000000000: # 13位毫秒
+                    return datetime.fromtimestamp(time_val / 1000)
+                return datetime.fromtimestamp(time_val)
+            
+            # 2. 字符串处理
+            time_str = str(time_val).strip()
+            
+            # 格式: "2026-02-05 09:30:00"
+            if "-" in time_str and ":" in time_str:
+                return datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+            # 格式: "09:30" (补全为当天)
+            elif ":" in time_str and len(time_str) <= 5:
+                t = datetime.strptime(time_str, "%H:%M")
+                return now.replace(hour=t.hour, minute=t.minute, second=0)
+            
+            return now
         except: return datetime.now()
 
     @retry(retries=1)
-    def _get_cailian_press(self):
+    def _get_eastmoney(self):
         """
-        [源1] 财联社电报 - A股短线情绪的核心
-        替代雪球/同花顺，这是它们的上游数据源
+        [源1] 东方财富 (EastMoney) - 稳健基石
+        使用 AkShare 接口
         """
+        news_list = []
         try:
-            # 获取财联社电报
-            df = ak.stock_telegraph_cls(symbol="全部")
-            # 数据清洗
-            news_list = []
+            # 获取7x24小时全球财经直播
+            df = ak.stock_news_em(symbol="全部")
             for _, row in df.iterrows():
-                # 只要最近 24 小时内的
-                pub_time = f"{row['日期']} {row['时间']}"
-                pub_dt = datetime.strptime(pub_time, "%Y-%m-%d %H:%M")
-                
-                if datetime.now() - pub_dt > timedelta(hours=24):
-                    continue
-
-                content = row['内容']
-                # 简化内容：如果是长文，只取第一句或标题
-                title = row['标题'] if row['标题'] else content[:40] + "..."
+                pub_dt = self._parse_time(f"{row['发布日期']} {row['发布时间']}")
+                if datetime.now() - pub_dt > timedelta(hours=24): continue
                 
                 news_list.append({
-                    "title": title,
-                    "source": "财联社·电报",
-                    "pub_dt": pub_dt
+                    "title": row['内容'][:80] + "..." if len(row['内容']) > 80 else row['内容'],
+                    "source": "东方财富",
+                    "pub_dt": pub_dt,
+                    "weight": 1.0 # 基础权重
                 })
-            return news_list[:10] # 取前10条备选
-        except Exception as e:
-            logger.warning(f"财联社源获取失败: {e}")
-            return []
-
-    @retry(retries=1)
-    def _get_eastmoney_news(self):
-        """
-        [源2] 东方财富 - 全球财经快讯
-        用于补充宏观视角
-        """
-        try:
-            # 东方财富-全球财经快讯
-            df = ak.stock_info_global_cls(symbol="全部")
-            news_list = []
-            for _, row in df.iterrows():
-                pub_time = f"{row['发布日期']} {row['发布时间']}"
-                pub_dt = datetime.strptime(pub_time, "%Y-%m-%d %H:%M:%S")
-
-                if datetime.now() - pub_dt > timedelta(hours=24):
-                    continue
-                
-                news_list.append({
-                    "title": row['标题'],
-                    "source": "东财·快讯",
-                    "pub_dt": pub_dt
-                })
-            return news_list[:10]
         except Exception as e:
             logger.warning(f"东方财富源获取失败: {e}")
-            return []
+        return news_list
+
+    @retry(retries=1)
+    def _get_cailian_direct(self):
+        """
+        [源2] 财联社 (Cailian Press) - 速度之王
+        直接调用官方 API，绕过 akshare 报错问题
+        """
+        news_list = []
+        url = "https://www.cls.cn/nodeapi/telegraphList"
+        params = {
+            "rn": 20,           # 取20条
+            "sv": "7.7.5"
+        }
+        try:
+            # 财联社通常需要时间戳签名，但基础电报接口目前是公开的
+            res = requests.get(url, params=params, headers=self.headers, timeout=5)
+            if res.status_code == 200:
+                data = res.json().get('data', {}).get('roll_data', [])
+                for item in data:
+                    title = item.get('title', '')
+                    content = item.get('content', '')
+                    # 财联社电报有时候没有标题，只有内容
+                    final_title = title if title else (content[:80] + "..." if content else "快讯")
+                    
+                    # 财联社返回的是10位时间戳
+                    pub_dt = self._parse_time(item.get('ctime', time.time()))
+                    
+                    if datetime.now() - pub_dt > timedelta(hours=24): continue
+                    
+                    news_list.append({
+                        "title": final_title,
+                        "source": "财联社·电报",
+                        "pub_dt": pub_dt,
+                        "weight": 1.5 # 财联社权重更高，因为它是短线风向标
+                    })
+        except Exception as e:
+            logger.warning(f"财联社直连失败: {e}")
+        return news_list
+
+    @retry(retries=1)
+    def _get_cninfo_direct(self):
+        """
+        [源3] 巨潮资讯 (Cninfo) - 官方喉舌
+        直接调用官网'要闻'接口
+        """
+        news_list = []
+        # 巨潮资讯-要闻 API
+        url = "http://www.cninfo.com.cn/new/information/getFrontInfo"
+        params = {"type": "1"} # type=1 通常是宏观/市场要闻
+        
+        try:
+            res = requests.post(url, data=params, headers=self.headers, timeout=5)
+            if res.status_code == 200:
+                data = res.json()
+                # 巨潮返回的数据结构通常比较深
+                for item in data[:10]: # 取前10条
+                    title = item.get('title', '')
+                    if not title: continue
+                    
+                    # 巨潮时间格式通常是 "yyyy-MM-dd HH:mm:ss"
+                    pub_dt = self._parse_time(item.get('publishTime', ''))
+                    
+                    if datetime.now() - pub_dt > timedelta(hours=48): continue # 巨潮更新慢，放宽到48h
+                    
+                    news_list.append({
+                        "title": title,
+                        "source": "巨潮资讯·要闻",
+                        "pub_dt": pub_dt,
+                        "weight": 1.2 # 官方性质，权重次高
+                    })
+        except Exception as e:
+            logger.warning(f"巨潮资讯直连失败: {e}")
+        return news_list
 
     def get_macro_news(self):
         """
-        V12.0 全视之眼：多源聚合 + 实时热点
+        V12.5 三源合一：东财 + 财联社(直连) + 巨潮(直连)
         """
-        logger.info("正在连接 财联社 & 东方财富 实时数据终端...")
+        logger.info("启动三源情报网 (EastMoney | Cailian | Cninfo)...")
         
-        # 1. 并行获取多源数据
-        cls_news = self._get_cailian_press()
-        em_news = self._get_eastmoney_news()
+        # 1. 并行获取三路数据
+        news_pool = []
+        news_pool.extend(self._get_eastmoney())
+        news_pool.extend(self._get_cailian_direct())
+        news_pool.extend(self._get_cninfo_direct())
         
-        # 2. 合并数据池
-        all_news = cls_news + em_news
+        # 2. 灾难备份 (如果三路都挂了)
+        if not news_pool:
+            logger.error("API数据源全线异常，切换至 Google RSS 灾难备份...")
+            return self._fallback_google_rss()
         
-        # 3. 按时间倒序排列 (最新的在最前)
-        all_news.sort(key=lambda x: x['pub_dt'], reverse=True)
+        # 3. 排序：按 (时间权重 * 0.7 + 来源权重 * 0.3) 排序？
+        # 简单点：直接按时间倒序，最新的在最前
+        news_pool.sort(key=lambda x: x['pub_dt'], reverse=True)
         
-        # 4. 智能筛选 (去重 + 关键词加权)
+        # 4. 智能筛选与去重
         final_list = []
         seen_titles = set()
         
-        # 关键词加权：优先展示包含这些词的新闻
-        keywords = ["央行", "美联储", "降息", "GDP", "CPI", "牛市", "暴跌", "成交额", "北向"]
+        # 关键词库 (Keywords)
+        key_macro = ["央行", "美联储", "GDP", "CPI", "LPR", "印花税", "证监会"]
+        key_market = ["成交额", "北向", "跳水", "拉升", "涨停", "违约"]
         
-        # 先挑有关键词的
-        for news in all_news:
-            if len(final_list) >= 3: break
-            if any(k in news['title'] for k in keywords) and news['title'] not in seen_titles:
-                final_list.append(news)
-                seen_titles.add(news['title'])
-        
-        # 再填补剩下的空位
-        for news in all_news:
-            if len(final_list) >= 5: break
-            if news['title'] not in seen_titles:
-                final_list.append(news)
-                seen_titles.add(news['title'])
-        
-        # 5. 格式化输出 (计算 'x小时前')
-        output = []
-        if not final_list:
-             return [{"title": "全网情报静默 (API连接异常或无重大消息)", "source": "System Watch"}]
-
-        for news in final_list:
+        # 策略：优先选带关键词的，且优先选财联社的
+        for news in news_pool:
+            if len(final_list) >= 6: break # 展示6条
+            
+            # 去重 (简单模糊匹配)
+            is_duplicate = False
+            for seen in seen_titles:
+                # 如果标题相似度过高 (重合字符超过70%)
+                if news['title'][:10] in seen or seen[:10] in news['title']:
+                    is_duplicate = True
+                    break
+            if is_duplicate: continue
+            
+            # 标记为已选
+            seen_titles.add(news['title'])
+            
+            # 格式化时间标签
             delta = datetime.now() - news['pub_dt']
-            
             if delta.seconds < 3600:
-                time_label = f"{int(delta.seconds/60)}分钟前"
+                time_lbl = f"{int(delta.seconds/60)}分钟前"
             elif delta.days < 1:
-                time_label = f"{int(delta.seconds/3600)}小时前"
+                time_lbl = f"{int(delta.seconds/3600)}小时前"
             else:
-                time_label = "1天前"
+                time_lbl = "1天前"
             
-            output.append({
+            final_list.append({
                 "title": news['title'],
-                "source": f"{news['source']} [{time_label}]"
+                "source": f"{news['source']} [{time_lbl}]"
             })
             
-        return output
+        return final_list
+
+    def _fallback_google_rss(self):
+        """
+        RSS 备份
+        """
+        try:
+            url = "https://news.google.com/rss/search?q=A股+宏观&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+            res = requests.get(url, timeout=10)
+            root = ET.fromstring(res.content)
+            ret = []
+            for item in root.findall('.//item')[:5]:
+                t = item.find('title').text.split(' - ')[0]
+                ret.append({"title": t, "source": "RSS备份"})
+            return ret
+        except:
+            return [{"title": "全网数据源连接中断", "source": "System Offline"}]
 
     def get_market_sentiment(self):
         news = self.get_macro_news()
