@@ -2,11 +2,14 @@ name: Daily AI Fund Advisor
 
 on:
   schedule:
-    - cron: '30 1 * * 1-5' # 北京时间 9:30
-  workflow_dispatch:
-  push:
-    paths-ignore:
-      - 'portfolio.json' # 核心：修改账本不触发，防止死循环
+    - cron: '30 1 * * 1-5' # 北京时间 9:30 (保持不变)
+  workflow_dispatch:       # 手动触发 (保持不变，方便你测试)
+  
+  # --- 暂时关闭 PUSH 触发 ---
+  # push:
+  #   paths-ignore:
+  #     - 'portfolio.json'
+  # ------------------------
 
 concurrency: 
   group: ${{ github.workflow }}
@@ -34,17 +37,13 @@ jobs:
 
     - name: Run Analysis
       env:
-        # 这里引用 GitHub Secrets
         LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
         MAIL_USER: ${{ secrets.MAIL_USER }}
         MAIL_PASS: ${{ secrets.MAIL_PASS }}
         TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-        
-        # 这里指定模型变量，Python 脚本会读取它
-        # 您可以在这里随意切换 Pro/moonshotai/Kimi-K2.5 或 deepseek-ai/DeepSeek-V3
         LLM_MODEL: "Pro/moonshotai/Kimi-K2.5"
-        
+      
       run: |
         python main.py
 
@@ -53,10 +52,8 @@ jobs:
         git config --global user.name "GitHub Action"
         git config --global user.email "action@github.com"
         
-        # 检查是否有变化
         if [[ -n $(git status --porcelain portfolio.json) ]]; then
           git add portfolio.json
-          # 核心：[skip ci] 防止触发下一次 Action
           git commit -m "📈 Auto-update portfolio ledger [skip ci]"
           git push
         else
