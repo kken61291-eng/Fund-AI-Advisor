@@ -1,49 +1,55 @@
 global:
-  base_invest_amount: 500      # 单次基准买入金额
-  max_daily_invest: 2000       # 单日最大买入上限
+  base_invest_amount: 1000   
+  max_daily_invest: 5000     
 
 funds:
-  # --- 核心底仓 (Core & Dividend) ---
+  # --- 核心底仓 ---
   - name: "红利ETF"
-    code: "515080"
-    strategy_type: "dividend"  # 触发股债性价比分析
-    sector_keyword: "红利 高股息"
-    index_name: "中证红利"      # 估值锚: sz399922
+    code: "510880"
+    strategy_type: "dividend"
+    index_name: "中证红利"
+    # [升级] 增加: 市值管理, 央企考核, 股息率
+    sector_keyword: "高股息 央企 红利 市值管理 分红 煤炭 银行"
 
   - name: "沪深300ETF"
     code: "510300"
     strategy_type: "core"
-    sector_keyword: "沪深300"
-    index_name: "沪深300"       # 估值锚: sh000300
+    index_name: "沪深300"
+    # [升级] 增加: 外资, 茅台(权重股代称), 核心资产
+    sector_keyword: "A股 核心资产 蓝筹 白马股 北向资金 茅台 宁德时代"
 
-  # --- 卫星进攻 (Satellite) ---
+  # --- 卫星进攻 ---
   - name: "传媒ETF"
-    code: "512980"             # 广发传媒ETF
-    strategy_type: "satellite" # 波动大，做波段
-    sector_keyword: "传媒 游戏 短剧"
-    index_name: "中证传媒"      # 估值锚: sz399971
-
-  - name: "证券ETF"
-    code: "512880"
+    code: "512980"
     strategy_type: "satellite"
-    sector_keyword: "证券 券商"
-    index_name: "全指证券公司"  # 估值锚: sz399975
-
-  - name: "煤炭ETF"
-    code: "515220"
-    strategy_type: "satellite"
-    sector_keyword: "煤炭 能源"
-    index_name: "中证煤炭"      # 估值锚: sz399998
+    index_name: "中证传媒"
+    # [升级] 增加: Sora, AIGC, 游戏版号
+    sector_keyword: "传媒 游戏 AI应用 短剧 电影 字节跳动 OpenAI Sora"
 
   - name: "半导体ETF"
     code: "512480"
     strategy_type: "satellite"
-    sector_keyword: "半导体 芯片"
-    index_name: "中华半导体"    # 估值锚: sz399989
+    index_name: "全指半导体"
+    # [升级] 增加: 大基金, 华为, 光刻机
+    sector_keyword: "半导体 芯片 集成电路 华为 海思 大基金 光刻机 存储"
 
-  # --- 商品/特殊 (Commodity) ---
+  - name: "证券ETF"
+    code: "512880"
+    strategy_type: "satellite"
+    index_name: "全指证券公司"
+    # [升级] 增加: 降费, 并购重组, 投行
+    sector_keyword: "证券 券商 牛市旗手 印花税 降费 并购重组"
+
+  - name: "煤炭ETF"
+    code: "515220"
+    strategy_type: "dividend" 
+    index_name: "中证煤炭"
+    # [升级] 增加: 电力, 寒潮, 焦煤
+    sector_keyword: "煤炭 能源 期货 动力煤 焦煤 寒潮 电力"
+
   - name: "黄金ETF"
     code: "518880"
-    strategy_type: "commodity" # 跳过估值检查
-    sector_keyword: "黄金 避险"
-    index_name: ""             # 无锚
+    strategy_type: "commodity"
+    index_name: "" 
+    # [升级] 增加: 避险, 央行购金
+    sector_keyword: "黄金 金价 美联储 避险 央行购金 通胀 地缘"
