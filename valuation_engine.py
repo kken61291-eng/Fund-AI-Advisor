@@ -5,7 +5,6 @@ import time
 from datetime import datetime
 from utils import logger, retry
 
-# 安全引入 Tushare
 try:
     import tushare as ts
 except ImportError:
@@ -22,7 +21,6 @@ class ValuationEngine:
                 self.tushare_api = ts.pro_api(token)
             except: pass
 
-        # 映射表
         self.INDEX_MAP = {
             "沪深300":      {"em": "sh000300", "sina": "sh000300", "ts": "000300.SH"},
             "中证红利":      {"em": "sz399922", "sina": "sz399922", "ts": "399922.SZ"},
@@ -33,7 +31,7 @@ class ValuationEngine:
             "中证传媒":      {"em": "sz399971", "sina": "sz399971", "ts": "399971.SZ"}
         }
 
-    @retry(retries=2, delay=2) # [修复] backoff_factor -> delay
+    @retry(retries=2, delay=2)
     def _get_bond_yield(self):
         if self.cn_10y_yield: return self.cn_10y_yield
         try:
@@ -43,25 +41,22 @@ class ValuationEngine:
             return val
         except: return 2.3
 
-    @retry(retries=2, delay=1) # [修复] backoff_factor -> delay
+    @retry(retries=2, delay=1)
     def _fetch_history_data(self, index_name):
         codes = self.INDEX_MAP.get(index_name)
         if not codes: return None
 
-        # 1. 东财
         try:
             df = ak.stock_zh_index_daily_em(symbol=codes['em'])
             return df['close']
         except Exception: pass
 
-        # 2. 新浪
         try:
             time.sleep(1)
             df = ak.stock_zh_index_daily(symbol=codes['sina'])
             return df['close']
         except Exception: pass
 
-        # 3. Tushare
         if self.tushare_api:
             try:
                 time.sleep(1)
@@ -82,7 +77,6 @@ class ValuationEngine:
             if history is None or len(history) < 100: return 1.0, "数据源全线不可用"
 
             current = history.iloc[-1]
-            # 计算百分位 (近5年)
             percentile = (history.tail(1250) < current).mean()
             p_str = f"{int(percentile*100)}%"
             
