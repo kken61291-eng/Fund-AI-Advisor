@@ -77,7 +77,7 @@ def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily
     if reasons: tech['quant_reasons'] = reasons
     return final_amt, label, is_sell, sell_val
 
-# [UI 渲染 V14.19: 高对比度修复]
+# [UI 渲染 V14.21: 纯净白字修复]
 def render_html_report_v13(all_news, results, cio_html, advisor_html):
     news_html = ""
     seen_titles = set()
@@ -195,7 +195,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
         except Exception as e:
             logger.error(f"渲染错误 {r.get('name')}: {e}")
 
-    # [修复] 提升对比度：玄铁先生背景更黑(#0f0f0f)，文字更亮(#e0e0e0)，字体改用通用衬线体 Georgia
+    # [修复] 强制白色字体，适应深色背景
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
         body {{ background: #0a0a0a; color: #f0e6d2; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; max-width: 660px; margin: 0 auto; padding: 20px; }}
         .main-container {{ border: 2px solid #333; border-top: 5px solid #ffb74d; border-radius: 4px; padding: 20px; background: linear-gradient(180deg, #1b1b1b 0%, #000000 100%); }}
@@ -206,7 +206,6 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
         .radar-panel {{ background: #111; border: 1px solid #333; border-radius: 4px; padding: 15px; margin-bottom: 25px; }}
         .radar-title {{ font-size: 14px; color: #ffb74d; font-weight: bold; margin-bottom: 12px; border-bottom: 1px solid #444; padding-bottom: 6px; letter-spacing: 1px; }}
 
-        /* CIO 红色警报风格 */
         .cio-section {{ 
             background: linear-gradient(145deg, #1a0505, #2b0b0b); 
             border: 1px solid #5c1818; 
@@ -215,12 +214,14 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             margin-bottom: 20px; 
             border-radius: 2px; 
             box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-            color: #d7ccc8; /* CIO 文字颜色 */
         }}
         
-        /* 玄铁先生 高对比度黑金风格 */
+        /* 强制CIO部分字体为纯白 */
+        .cio-section p, .cio-section div, .cio-section h3 {{ color: #ffffff !important; line-height: 1.6; }}
+        .cio-section h3 {{ border-bottom: 1px dashed #5c1818; padding-bottom: 5px; margin-top: 15px; margin-bottom: 8px; }}
+
         .advisor-section {{ 
-            background: #0f0f0f; /* 纯黑底色，增加对比 */
+            background: #0f0f0f; 
             border: 1px solid #d4af37; 
             border-left: 4px solid #ffd700; 
             padding: 20px; 
@@ -228,16 +229,19 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             border-radius: 4px; 
             box-shadow: 0 0 10px rgba(212, 175, 55, 0.2); 
             position: relative;
-            color: #e0e0e0; /* 亮银灰文字，确保清晰 */
         }}
         
+        /* 强制玄铁先生部分字体为纯白 */
+        .advisor-section p, .advisor-section div, .advisor-section h4 {{ color: #ffffff !important; line-height: 1.6; font-family: 'Georgia', serif; }}
+        .advisor-section h4 {{ color: #ffd700 !important; margin-top: 15px; margin-bottom: 8px; border-bottom: 1px dashed #333; padding-bottom: 4px; }}
+
         .section-title {{ font-size: 16px; font-weight: bold; margin-bottom: 15px; color: #eee; text-transform: uppercase; letter-spacing: 1px; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }}
         .footer {{ text-align: center; font-size: 10px; color: #444; margin-top: 40px; }}
     </style></head><body>
         <div class="main-container">
             <div class="header">
                 <h1 class="title">XUANTIE QUANT</h1>
-                <div class="subtitle">HEAVY SWORD, NO EDGE | V14.19 READABILITY</div>
+                <div class="subtitle">HEAVY SWORD, NO EDGE | V14.21 WHITE TEXT</div>
             </div>
             
             <div class="radar-panel">
@@ -252,11 +256,11 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
 
             <div class="advisor-section">
                 <div class="section-title" style="color: #ffd700;">🗡️ 玄铁先生·场外实战复盘</div>
-                <div style="font-family: 'Georgia', serif; line-height: 1.6; color: #f5f5f5; font-size: 14px;">{advisor_html}</div>
+                {advisor_html}
             </div>
 
             {rows}
-            <div class="footer">EST. 2026 | POWERED BY EM NEWS</div>
+            <div class="footer">EST. 2026 | POWERED BY AKSHARE & EM</div>
         </div>
     </body></html>"""
 
@@ -283,6 +287,7 @@ def process_single_fund(fund, config, fetcher, scanner, tracker, val_engine, ana
         with tracker_lock: pos = tracker.get_position(fund['code'])
 
         ai_adj = 0; ai_res = {}
+        # [核心改动] 恢复使用关键词检索
         keyword = fund.get('sector_keyword', fund['name']) 
         
         if analyst and (pos['shares']>0 or tech['quant_score']>=60 or tech['quant_score']<=35):
@@ -332,7 +337,7 @@ def main():
     tracker = PortfolioTracker()
     val_engine = ValuationEngine()
     
-    logger.info(">>> [V14.19] 启动玄铁量化 (High Contrast Readability)...")
+    logger.info(">>> [V14.21] 启动玄铁量化 (Keyword Matrix + White Text)...")
     tracker.confirm_trades()
     try: analyst = NewsAnalyst()
     except: analyst = None
@@ -346,7 +351,7 @@ def main():
 
     results = []; cio_lines = [f"【宏观环境】: {macro_str}\n"]
     
-    # 保持单线程稳定
+    # 单线程稳健运行
     with ThreadPoolExecutor(max_workers=1) as executor:
         future_to_fund = {executor.submit(
             process_single_fund, 
@@ -371,6 +376,6 @@ def main():
         advisor_html = analyst.advisor_review(full_report, macro_str) if analyst else "<p>玄铁先生闭关中</p>"
         
         html = render_html_report_v13(all_news_seen, results, cio_html, advisor_html) 
-        send_email("🗡️ 玄铁量化 V14.19 最终决议", html)
+        send_email("🗡️ 玄铁量化 V14.21 最终决议", html)
 
 if __name__ == "__main__": main()
