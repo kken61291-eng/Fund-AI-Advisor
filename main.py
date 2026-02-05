@@ -77,7 +77,7 @@ def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily
     if reasons: tech['quant_reasons'] = reasons
     return final_amt, label, is_sell, sell_val
 
-# [UI 渲染]
+# [UI 渲染 V14.19: 高对比度修复]
 def render_html_report_v13(all_news, results, cio_html, advisor_html):
     news_html = ""
     seen_titles = set()
@@ -195,6 +195,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
         except Exception as e:
             logger.error(f"渲染错误 {r.get('name')}: {e}")
 
+    # [修复] 提升对比度：玄铁先生背景更黑(#0f0f0f)，文字更亮(#e0e0e0)，字体改用通用衬线体 Georgia
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
         body {{ background: #0a0a0a; color: #f0e6d2; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; max-width: 660px; margin: 0 auto; padding: 20px; }}
         .main-container {{ border: 2px solid #333; border-top: 5px solid #ffb74d; border-radius: 4px; padding: 20px; background: linear-gradient(180deg, #1b1b1b 0%, #000000 100%); }}
@@ -214,18 +215,20 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             margin-bottom: 20px; 
             border-radius: 2px; 
             box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            color: #d7ccc8; /* CIO 文字颜色 */
         }}
         
-        /* 玄铁先生 黑金流光风格 */
+        /* 玄铁先生 高对比度黑金风格 */
         .advisor-section {{ 
-            background: linear-gradient(145deg, #1a1a1a, #262626); 
-            border: 1px solid #d4af37; /* 土豪金 */
+            background: #0f0f0f; /* 纯黑底色，增加对比 */
+            border: 1px solid #d4af37; 
             border-left: 4px solid #ffd700; 
             padding: 20px; 
             margin-bottom: 30px; 
             border-radius: 4px; 
-            box-shadow: 0 0 15px rgba(212, 175, 55, 0.15); /* 金色微光 */
+            box-shadow: 0 0 10px rgba(212, 175, 55, 0.2); 
             position: relative;
+            color: #e0e0e0; /* 亮银灰文字，确保清晰 */
         }}
         
         .section-title {{ font-size: 16px; font-weight: bold; margin-bottom: 15px; color: #eee; text-transform: uppercase; letter-spacing: 1px; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }}
@@ -234,7 +237,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
         <div class="main-container">
             <div class="header">
                 <h1 class="title">XUANTIE QUANT</h1>
-                <div class="subtitle">HEAVY SWORD, NO EDGE | V14.18 STABLE</div>
+                <div class="subtitle">HEAVY SWORD, NO EDGE | V14.19 READABILITY</div>
             </div>
             
             <div class="radar-panel">
@@ -249,7 +252,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
 
             <div class="advisor-section">
                 <div class="section-title" style="color: #ffd700;">🗡️ 玄铁先生·场外实战复盘</div>
-                <div style="font-family: 'KaiTi', serif; line-height: 1.6;">{advisor_html}</div>
+                <div style="font-family: 'Georgia', serif; line-height: 1.6; color: #f5f5f5; font-size: 14px;">{advisor_html}</div>
             </div>
 
             {rows}
@@ -329,7 +332,7 @@ def main():
     tracker = PortfolioTracker()
     val_engine = ValuationEngine()
     
-    logger.info(">>> [V14.18] 启动玄铁量化 (Single Thread Stable)...")
+    logger.info(">>> [V14.19] 启动玄铁量化 (High Contrast Readability)...")
     tracker.confirm_trades()
     try: analyst = NewsAnalyst()
     except: analyst = None
@@ -343,7 +346,7 @@ def main():
 
     results = []; cio_lines = [f"【宏观环境】: {macro_str}\n"]
     
-    # [核心修复] max_workers=1 单线程执行，避免被封 IP
+    # 保持单线程稳定
     with ThreadPoolExecutor(max_workers=1) as executor:
         future_to_fund = {executor.submit(
             process_single_fund, 
@@ -368,6 +371,6 @@ def main():
         advisor_html = analyst.advisor_review(full_report, macro_str) if analyst else "<p>玄铁先生闭关中</p>"
         
         html = render_html_report_v13(all_news_seen, results, cio_html, advisor_html) 
-        send_email("🗡️ 玄铁量化 V14.18 最终决议", html)
+        send_email("🗡️ 玄铁量化 V14.19 最终决议", html)
 
 if __name__ == "__main__": main()
