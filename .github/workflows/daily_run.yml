@@ -2,7 +2,7 @@ name: Daily AI Fund Advisor
 
 on:
   schedule:
-    - cron: '30 1 * * 1-5' # 北京时间 9:30
+    - cron: '20 6 * * 1-5' # 北京时间 9:30
   workflow_dispatch:
 
 concurrency: 
