@@ -1,57 +1,70 @@
 import akshare as ak
-import requests
-import re
-from datetime import datetime
+import pandas as pd
+import time
+from datetime import datetime, timedelta
 from utils import logger, retry
 
-class MarketScanner:
+# 安全导入 yfinance
+try:
+    import yfinance as yf
+except ImportError:
+    yf = None
+
+class DataFetcher:
     def __init__(self):
         pass
 
-    @retry(retries=2, delay=2) # [修复] backoff_factor -> delay
-    def get_macro_news(self):
+    @retry(retries=2, delay=2)  # [修复] backoff_factor -> delay
+    def get_fund_history(self, code, period='3y'):
         """
-        获取宏观新闻 (财联社电报)
+        获取基金/股票历史数据 (三源容灾: 东财 -> 新浪 -> Yahoo)
         """
-        news_list = []
+        # 1. 尝试 AkShare (东财源 - 质量最高)
         try:
-            # 接口: cls_telegraph_news (财联社电报)
-            df = ak.cls_telegraph_news()
+            # 智能推断前缀
+            symbol = code
+            if not code.startswith('sh') and not code.startswith('sz'):
+                symbol = f"sh{code}" if code.startswith('5') or code.startswith('6') else f"sz{code}"
             
-            # 过滤关键词
-            keywords = ["央行", "加息", "降息", "GDP", "CPI", "美联储", "战争", "突发", "重磅", "国务院", "A股", "港股", "外资"]
-            
-            for _, row in df.iterrows():
-                content = str(row.get('content', ''))
-                title = str(row.get('title', ''))
-                
-                # 如果没有标题，用内容截取
-                if not title or title == 'nan':
-                    title = content[:30] + "..."
-                
-                full_text = title + content
-                
-                # 时间过滤 (只看最近24小时)
-                # 财联社返回通常是实时，这里简单取前5条重要的
-                
-                if any(k in full_text for k in keywords):
-                    # 简单的清洗
-                    clean_title = re.sub(r'<[^>]+>', '', title).strip()
-                    news_list.append({
-                        "title": clean_title,
-                        "source": "财联社",
-                        "time": row.get('ctime', '')
-                    })
-                    
-            return news_list[:5] # 只返回前5条最宏观的
-            
+            # 接口: fund_etf_hist_em
+            df = ak.fund_etf_hist_em(symbol=code, period="daily", start_date="20200101", end_date="20500101")
+            if not df.empty:
+                df = df.rename(columns={"日期": "date", "收盘": "close", "最高": "high", "最低": "low", "开盘": "open", "成交量": "volume"})
+                df['date'] = pd.to_datetime(df['date'])
+                df.set_index('date', inplace=True)
+                return df
         except Exception as e:
-            logger.warning(f"宏观新闻获取失败: {e}")
-            # 备用：返回静态提示，防止报错
-            return [{"title": "宏观数据源暂时不可用，请关注市场盘面。", "source": "系统提示"}]
+            logger.warning(f"东财源获取失败 {code}: {str(e)[:50]}")
 
-    def get_sector_news(self, keyword):
-        """
-        [保留接口] 获取特定板块新闻
-        """
-        return []
+        # 2. 尝试 AkShare (新浪源 - 兼容性好)
+        try:
+            time.sleep(1)
+            symbol = f"sh{code}" if code.startswith('5') or code.startswith('6') else f"sz{code}"
+            df = ak.stock_zh_index_daily(symbol=symbol)
+            if not df.empty:
+                df = df.rename(columns={"date": "date", "close": "close", "high": "high", "low": "low", "open": "open", "volume": "volume"})
+                df['date'] = pd.to_datetime(df['date'])
+                df.set_index('date', inplace=True)
+                return df
+        except Exception:
+            pass
+
+        # 3. 兜底 Yahoo Finance (国际源)
+        if yf:
+            try:
+                time.sleep(1)
+                suffix = ".SS" if code.startswith('5') or code.startswith('6') else ".SZ"
+                symbol = code + suffix
+                ticker = yf.Ticker(symbol)
+                df = ticker.history(period="2y")
+                if not df.empty:
+                    df = df.rename(columns={"Close": "close", "High": "high", "Low": "low", "Open": "open", "Volume": "volume"})
+                    # Yahoo 时区问题处理
+                    if df.index.tz is not None:
+                        df.index = df.index.tz_localize(None)
+                    return df
+            except Exception as e:
+                logger.error(f"Yahoo 获取失败 {code}: {e}")
+
+        logger.error(f"❌ 四重数据源全线失败: {code}")
+        return None
