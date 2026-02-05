@@ -12,27 +12,29 @@ from valuation_engine import ValuationEngine
 from portfolio_tracker import PortfolioTracker
 from utils import send_email, logger
 
-# 全局锁
 tracker_lock = threading.Lock()
 
 def load_config():
     with open('config.yaml', 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
 
-# [核心决策逻辑]
+# [核心决策逻辑 V14.5: 增加技术风控官一票否决权]
 def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily, pos, strategy_type):
     base_score = tech.get('quant_score', 50)
-    # [V14.0] 投委会修正
     tactical_score = max(0, min(100, base_score + ai_adj))
     
     tech['final_score'] = tactical_score
     tech['ai_adjustment'] = ai_adj
     tech['valuation_desc'] = val_desc
     
+    # 获取技术风控官的令牌
+    cro_signal = tech.get('tech_cro_signal', 'PASS')
+    cro_comment = tech.get('tech_cro_comment', '')
+    
     tactical_mult = 0
     reasons = []
 
-    # 战术分层
+    # 1. 正常战术评分
     if tactical_score >= 85: tactical_mult = 2.0; reasons.append("战术:极强")
     elif tactical_score >= 70: tactical_mult = 1.0; reasons.append("战术:走强")
     elif tactical_score >= 60: tactical_mult = 0.5; reasons.append("战术:企稳")
@@ -40,7 +42,7 @@ def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily
 
     final_mult = tactical_mult
     
-    # 战略(估值)修正
+    # 2. 战略(估值)修正
     if tactical_mult > 0:
         if val_mult < 0.5: final_mult = 0; reasons.append(f"战略:高估刹车")
         elif val_mult > 1.0: final_mult *= val_mult; reasons.append(f"战略:低估加倍")
@@ -51,10 +53,19 @@ def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily
         if val_mult >= 1.5 and strategy_type in ['core', 'dividend']:
             final_mult = 0.5; reasons.append(f"战略:左侧定投")
 
-    # 锁仓风控
+    # 3. [V14.5 新增] 技术风控官一票否决
+    if cro_signal == "VETO":
+        if final_mult > 0:
+            final_mult = 0 # 强制取消买入
+            reasons.append(f"🛡️风控:否决买入")
+        elif final_mult == 0:
+            # 如果原本是观望，且风控报警，可视情况减仓
+            pass 
+    
+    # 4. 锁仓风控 (T+N)
     held_days = pos.get('held_days', 999)
     if final_mult < 0 and pos['shares'] > 0 and held_days < 7:
-        final_mult = 0; reasons.append(f"风控:锁仓({held_days}天)")
+        final_mult = 0; reasons.append(f"规则:锁仓({held_days}天)")
 
     final_amt = 0; is_sell = False; sell_val = 0; label = "观望"
 
@@ -71,14 +82,14 @@ def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily
     if reasons: tech['quant_reasons'] = reasons
     return final_amt, label, is_sell, sell_val
 
-# [V14.0 UI] 投委会辩论版
-def render_html_report_v13(macro_list, results, cio, advisor):
+# [V14.5 UI: 增加风控官展示]
+def render_html_report_v13(macro_list, results, cio_html, advisor_html):
     macro_html = ""
     for news in macro_list:
         macro_html += f"""
         <div style="font-size:12px;color:#eeeeee;margin-bottom:6px;border-bottom:1px dashed #5d4037;padding-bottom:4px;line-height:1.4;">
             <span style="color:#ffb74d;margin-right:5px;font-weight:bold;">●</span>{news.get('title','')} 
-            <span style="color:#bdbdbd;float:right;font-size:10px;">[{news.get('source','')}]</span>
+            <span style="color:#bdbdbd;float:right;font-size:10px;">[{news.get('time','')[5:]}]</span>
         </div>
         """
 
@@ -96,7 +107,13 @@ def render_html_report_v13(macro_list, results, cio, advisor):
             risk = tech.get('risk_factors', {})
             final_score = tech.get('final_score', 0)
             
-            # 持仓收益
+            # 风控官数据
+            cro_signal = tech.get('tech_cro_signal', 'PASS')
+            cro_comment = tech.get('tech_cro_comment', '无')
+            cro_style = "color:#66bb6a;font-weight:bold;" # 绿色通过
+            if cro_signal == "VETO": cro_style = "color:#ef5350;font-weight:bold;" # 红色否决
+            elif cro_signal == "WARN": cro_style = "color:#ffb74d;font-weight:bold;" # 黄色警告
+
             profit_html = ""
             pos_cost = r.get('pos_cost', 0.0)
             pos_shares = r.get('pos_shares', 0)
@@ -107,7 +124,6 @@ def render_html_report_v13(macro_list, results, cio, advisor):
                 p_color = "#ff5252" if profit_val > 0 else "#69f0ae" 
                 profit_html = f"""<div style="font-size:12px;margin-bottom:8px;background:rgba(255,255,255,0.05);padding:4px 8px;border-radius:3px;display:flex;justify-content:space-between;"><span style="color:#aaa;">持有收益:</span><span style="color:{p_color};font-weight:bold;">{profit_val:+.1f}元 ({profit_pct:+.2f}%)</span></div>"""
             
-            # 基础配色
             if r['amount'] > 0: 
                 border_color = "#d32f2f"; bg_gradient = "linear-gradient(90deg, rgba(60,10,10,0.9) 0%, rgba(20,20,20,0.95) 100%)"; act_html = f"<span style='color:#ff8a80;font-weight:bold'>+{r['amount']:,}</span>"
             elif r.get('is_sell'): 
@@ -116,11 +132,10 @@ def render_html_report_v13(macro_list, results, cio, advisor):
                 border_color = "#555"; bg_gradient = "linear-gradient(90deg, rgba(30,30,30,0.9) 0%, rgba(15,15,15,0.95) 100%)"; act_html = "<span style='color:#777'>HOLD</span>"
             
             reasons = " ".join([f"<span style='border:1px solid #555;padding:0 3px;font-size:9px;border-radius:2px;color:#888;'>{x}</span>" for x in tech.get('quant_reasons', [])])
-            
             val_desc = tech.get('valuation_desc', 'N/A')
             val_style = "color:#ffb74d;font-weight:bold;" if "低估" in val_desc else ("color:#ef5350;font-weight:bold;" if "高估" in val_desc else "color:#bdbdbd;")
 
-            # [V14.0] 投委会辩论 UI
+            # 投委会
             committee_html = ""
             ai_data = r.get('ai_analysis', {})
             bull_say = ai_data.get('bull_say')
@@ -129,37 +144,20 @@ def render_html_report_v13(macro_list, results, cio, advisor):
             risk_alert = ai_data.get('risk_alert', '无')
 
             if bull_say and bear_say:
-                risk_tag = f'<div style="margin-top:4px;color:#ef5350;font-size:10px;font-weight:bold;border-top:1px dashed #555;padding-top:2px;">⚡ 风险警示: {risk_alert}</div>' if risk_alert != '无' else ''
-                
                 committee_html = f"""
                 <div style="margin-top:12px;border-top:1px solid #444;padding-top:10px;">
                     <div style="font-size:10px;color:#888;margin-bottom:6px;text-align:center;">--- 投委会辩论实录 ---</div>
-                    
                     <div style="display:flex;gap:10px;margin-bottom:8px;">
-                        <div style="flex:1;background:rgba(27,94,32,0.2);padding:8px;border-radius:4px;border-left:2px solid #66bb6a;">
-                            <div style="color:#66bb6a;font-size:11px;font-weight:bold;margin-bottom:4px;">🦊 CGO (多头)</div>
-                            <div style="color:#c8e6c9;font-size:11px;line-height:1.3;font-style:italic;">"{bull_say}"</div>
-                        </div>
-                        
-                        <div style="flex:1;background:rgba(183,28,28,0.2);padding:8px;border-radius:4px;border-left:2px solid #ef5350;">
-                            <div style="color:#ef5350;font-size:11px;font-weight:bold;margin-bottom:4px;">🐻 CRO (空头)</div>
-                            <div style="color:#ffcdd2;font-size:11px;line-height:1.3;font-style:italic;">"{bear_say}"</div>
-                        </div>
+                        <div style="flex:1;background:rgba(27,94,32,0.2);padding:8px;border-radius:4px;border-left:2px solid #66bb6a;"><div style="color:#66bb6a;font-size:11px;font-weight:bold;margin-bottom:4px;">🦊 CGO</div><div style="color:#c8e6c9;font-size:11px;line-height:1.3;font-style:italic;">"{bull_say}"</div></div>
+                        <div style="flex:1;background:rgba(183,28,28,0.2);padding:8px;border-radius:4px;border-left:2px solid #ef5350;"><div style="color:#ef5350;font-size:11px;font-weight:bold;margin-bottom:4px;">🐻 CRO</div><div style="color:#ffcdd2;font-size:11px;line-height:1.3;font-style:italic;">"{bear_say}"</div></div>
                     </div>
-                    
                     <div style="background:linear-gradient(90deg, rgba(255,183,77,0.1) 0%, rgba(255,183,77,0.05) 100%);padding:10px;border-radius:4px;border:1px solid rgba(255,183,77,0.3);position:relative;">
-                        <div style="color:#ffb74d;font-size:12px;font-weight:bold;margin-bottom:4px;">⚖️ 主席 (Chairman) 裁决</div>
-                        <div style="color:#fff3e0;font-size:12px;line-height:1.4;">{chairman}</div>
-                        {risk_tag}
+                        <div style="color:#ffb74d;font-size:12px;font-weight:bold;margin-bottom:4px;">⚖️ 主席裁决</div><div style="color:#fff3e0;font-size:12px;line-height:1.4;">{chairman}</div>
                     </div>
-                </div>
-                """
+                </div>"""
 
-            # 指标
             vol_ratio = risk.get('vol_ratio', 1.0)
-            div = risk.get('divergence', '无')
             vol_style = "color:#ffb74d;" if vol_ratio < 0.8 else ("color:#ff8a80;" if vol_ratio > 2.0 else "color:#bbb;")
-            div_style = "color:#ef5350;font-weight:bold;" if "顶背离" in str(div) else ("color:#a5d6a7;" if "底背离" in str(div) else "color:#bbb;")
 
             rows += f"""
             <div style="background:{bg_gradient};border-left:4px solid {border_color};margin-bottom:15px;padding:15px;border-radius:6px;box-shadow:0 4px 10px rgba(0,0,0,0.6);border-top:1px solid #333;">
@@ -167,6 +165,12 @@ def render_html_report_v13(macro_list, results, cio, advisor):
                     <div><span style="font-size:18px;font-weight:bold;color:#f0e6d2;font-family:'Times New Roman',serif;">{r['name']}</span><span style="font-size:12px;color:#9ca3af;margin-left:5px;">{r['code']}</span></div>
                     <div style="text-align:right;"><div style="color:#ffb74d;font-weight:bold;font-size:16px;text-shadow:0 0 5px rgba(255,183,77,0.3);">{final_score}</div><div style="font-size:9px;color:#666;">COMMITTEE SCORE</div></div>
                 </div>
+                
+                <div style="background:rgba(0,0,0,0.3);padding:6px 10px;border-radius:4px;margin-bottom:10px;display:flex;align-items:center;border-left:2px solid {('#66bb6a' if cro_signal=='PASS' else '#ef5350')};">
+                    <span style="font-size:11px;color:#aaa;margin-right:8px;">🛡️ 技术风控:</span>
+                    <span style="font-size:11px;{cro_style}">{cro_comment}</span>
+                </div>
+
                 <div style="display:flex;justify-content:space-between;color:#e0e0e0;font-size:15px;margin-bottom:5px;border-bottom:1px solid #444;padding-bottom:5px;">
                     <span style="font-weight:bold;color:#ffb74d;">{r.get('position_type')}</span><span style="font-family:'Courier New',monospace;">{act_html}</span>
                 </div>
@@ -176,7 +180,7 @@ def render_html_report_v13(macro_list, results, cio, advisor):
                     <span>RSI: {tech.get('rsi','-')}</span><span>MACD: {tech.get('macd',{}).get('trend','-')}</span><span>OBV: {'流入' if tech.get('flow',{}).get('obv_slope',0)>0 else '流出'}</span><span>Wkly: {tech.get('trend_weekly','-')}</span>
                 </div>
                 <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:5px;font-size:11px;color:#bdbdbd;font-family:'Courier New',monospace;margin-bottom:8px;">
-                    <span style="{vol_style}">VR: {vol_ratio}</span><span style="{div_style}">Div: {div}</span><span>%B: {risk.get('bollinger_pct_b',0.5)}</span>
+                    <span style="{vol_style}">VR: {vol_ratio}</span><span>Div: {risk.get('divergence','无')}</span><span>%B: {risk.get('bollinger_pct_b',0.5)}</span>
                 </div>
                 <div style="margin-bottom:8px;">{reasons}</div>
                 <div style="margin-top:5px;">{render_dots(r.get('history',[]))}</div>
@@ -201,11 +205,17 @@ def render_html_report_v13(macro_list, results, cio, advisor):
         <div class="main-container">
             <div class="header">
                 <h1 class="title">XUANTIE QUANT</h1>
-                <div class="subtitle">HEAVY SWORD, NO EDGE | V14.0 COMMITTEE</div>
+                <div class="subtitle">HEAVY SWORD, NO EDGE | V14.5 FEDERAL SYSTEM</div>
                 <div class="macro-panel"><div style="font-size:11px;color:#ffb74d;margin-bottom:10px;text-transform:uppercase;border-bottom:1px solid #333;padding-bottom:4px;">Global Macro Radar</div>{macro_html}</div>
             </div>
-            <div class="cio-paper"><div class="cio-seal">CIO APPROVED</div>{cio}</div>
-            <div class="advisor-paper">{advisor}</div>
+            <div class="cio-paper">
+                <div class="cio-seal">CIO APPROVED</div>
+                {cio_html}
+            </div>
+            <div class="advisor-paper">
+                <div style="color:#8d6e63;font-size:12px;font-weight:bold;margin-bottom:10px;">🗡️ 玄铁先生·场外实战复盘</div>
+                {advisor_html}
+            </div>
             {rows}
             <div class="footer">EST. 2026 | POWERED BY CAILIAN & JINSHI DATA <br>"In Math We Trust, By AI We Verify."</div>
         </div>
@@ -219,7 +229,6 @@ def process_single_fund(fund, config, fetcher, scanner, tracker, val_engine, ana
         logger.info(f"Analyzing {fund['name']}...")
         
         data = fetcher.get_fund_history(fund['code'])
-        # [修复] DataFrame 不能直接 if not data 判断
         if data is None or data.empty: 
             return None, f"数据失败: {fund['name']}"
 
@@ -246,7 +255,7 @@ def process_single_fund(fund, config, fetcher, scanner, tracker, val_engine, ana
             if amt > 0: tracker.add_trade(fund['code'], fund['name'], amt, tech['price'])
             elif is_sell: tracker.add_trade(fund['code'], fund['name'], s_val, tech['price'], True)
 
-        cio_log = f"- {fund['name']}: {lbl} ({val_desc})"
+        cio_log = f"- {fund['name']}: {lbl} (投委会:{ai_adj:+d} | 估值:{val_desc})"
         res = {
             "name": fund['name'], "code": fund['code'], 
             "amount": amt, "sell_value": s_val, "position_type": lbl, "is_sell": is_sell, 
@@ -266,14 +275,14 @@ def main():
     tracker = PortfolioTracker()
     val_engine = ValuationEngine()
     
-    logger.info(">>> [V14.0] 启动玄铁量化 (Investment Committee)...")
+    logger.info(">>> [V14.5] 启动玄铁量化 (Federal System + Technical CRO)...")
     tracker.confirm_trades()
     try: analyst = NewsAnalyst()
     except: analyst = None
 
     macro_news = scanner.get_macro_news()
     macro_str = " | ".join([n['title'] for n in macro_news])
-    results = []; cio_lines = [f"市场环境: {macro_str}"]
+    results = []; cio_lines = [f"【宏观环境】: {macro_str}"]
     
     with ThreadPoolExecutor(max_workers=3) as executor:
         future_to_fund = {executor.submit(process_single_fund, fund, config, fetcher, scanner, tracker, val_engine, analyst, macro_str, config['global']['base_invest_amount'], config['global']['max_daily_invest']): fund for fund in config['funds']}
@@ -285,9 +294,9 @@ def main():
 
     if results:
         results.sort(key=lambda x: -x['tech'].get('final_score', 0))
-        cio = analyst.review_report("\n".join(cio_lines)) if analyst else ""
-        adv = analyst.advisor_review("\n".join(cio_lines), macro_str) if analyst else ""
-        html = render_html_report_v13(macro_news, results, cio, adv) 
-        send_email("🗡️ 玄铁量化 V14.0 投委会决议", html)
+        cio_html = analyst.review_report("\n".join(cio_lines)) if analyst else "<p>CIO 缺席</p>"
+        advisor_html = analyst.advisor_review("\n".join(cio_lines), macro_str) if analyst else "<p>玄铁先生闭关中</p>"
+        html = render_html_report_v13(macro_news, results, cio_html, advisor_html) 
+        send_email("🗡️ 玄铁量化 V14.5 联邦决议", html)
 
 if __name__ == "__main__": main()
