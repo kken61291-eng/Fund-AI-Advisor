@@ -11,19 +11,17 @@ class MarketScanner:
     def _format_time(self, time_str):
         """统一时间格式为 MM-DD HH:MM"""
         try:
-            # 尝试解析完整时间 YYYY-MM-DD HH:MM:SS
             dt = datetime.strptime(str(time_str), "%Y-%m-%d %H:%M:%S")
             return dt.strftime("%m-%d %H:%M")
         except:
-            # 如果解析失败（比如已经是短时间），尝试保留关键部分
             s = str(time_str)
-            if len(s) > 10: return s[5:16] # 截取 MM-DD HH:MM
+            if len(s) > 10: return s[5:16]
             return s
 
     @retry(retries=2, delay=2) 
     def get_macro_news(self):
         """
-        获取全市场重磅新闻 (剔除汇总类，保留原子化快讯)
+        获取全市场重磅新闻 (V14.15 天网雷达版 - 50+ 核心词库)
         """
         news_list = []
         try:
@@ -39,8 +37,29 @@ class MarketScanner:
                 if '发布时间' in df.columns: time_col = '发布时间'
                 elif 'time' in df.columns: time_col = 'time'
 
-            keywords = ["央行", "加息", "降息", "GDP", "CPI", "美联储", "突发", "重磅", "国务院", "立案", "违约", "停牌", "外资", "财政部", "印花税", "A股"]
-            junk_words = ["汇总", "集锦", "回顾", "收评", "早报", "晚报", "盘前", "要闻精选", "公告一览"]
+            # --- V14.15 扩充词库 (The Skynet Keywords) ---
+            keywords = [
+                # 1. 顶层设计 & 权威部门
+                "中共中央", "政治局", "国务院", "发改委", "财政部", "国资委", "证监会", "央行", "外管局", "新华社", "新闻联播",
+                
+                # 2. 货币与财政 (水龙头)
+                "加息", "降息", "降准", "LPR", "MLF", "逆回购", "社融", "M2", "信贷", "特别国债", "赤字率", "流动性",
+                
+                # 3. 核心经济数据 (体温计)
+                "GDP", "CPI", "PPI", "PMI", "非农", "失业率", "通胀", "零售", "出口", "汇率", "人民币",
+                
+                # 4. 市场制度 & 改革 (游戏规则)
+                "印花税", "T+0", "停牌", "注册制", "退市", "做空", "融券", "量化限制", "市值管理", "分红", "回购",
+                
+                # 5. 主力动向 (资金流)
+                "汇金", "证金", "社保基金", "大基金", "北向", "外资", "增持", "举牌", "平准基金",
+                
+                # 6. 突发 & 风险 (黑天鹅)
+                "突发", "重磅", "立案", "调查", "违约", "破产", "战争", "制裁", "地缘", "暴雷"
+            ]
+            
+            # 垃圾词过滤
+            junk_words = ["汇总", "集锦", "回顾", "收评", "早报", "晚报", "盘前", "要闻精选", "公告一览", "涨停分析", "复盘"]
 
             for _, row in df.iterrows():
                 title = str(row.get(title_col, ''))
@@ -49,7 +68,6 @@ class MarketScanner:
                 if not title or title == 'nan': continue
                 if any(jw in title for jw in junk_words): continue
                 
-                # [修复] 统一时间格式
                 clean_time = self._format_time(raw_time)
                 
                 if any(k in title for k in keywords):
@@ -59,12 +77,12 @@ class MarketScanner:
                         "time": clean_time
                     })
             
+            # 智能补全: 如果筛选后太少，放宽限制补充几条
             if len(news_list) < 5:
                 for _, row in df.iterrows():
                     title = str(row.get(title_col, ''))
                     raw_time = str(row.get(time_col, ''))
                     if any(jw in title for jw in junk_words): continue
-                    
                     if any(n['title'] == title for n in news_list): continue
                     
                     news_list.append({
