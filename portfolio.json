@@ -47,5 +47,119 @@
     "cost": 0.0,
     "held_days": 0,
     "history": []
+  },
+  "positions": {
+    "515080": {
+      "shares": 0,
+      "avg_cost": 0,
+      "first_buy_date": null
+    },
+    "510300": {
+      "shares": 0,
+      "avg_cost": 0,
+      "first_buy_date": null
+    },
+    "512980": {
+      "shares": 0,
+      "avg_cost": 0,
+      "first_buy_date": null
+    },
+    "512880": {
+      "shares": 0,
+      "avg_cost": 0,
+      "first_buy_date": null
+    },
+    "512480": {
+      "shares": 0,
+      "avg_cost": 0,
+      "first_buy_date": null
+    }
+  },
+  "cash": 0,
+  "history": [
+    {
+      "date": "2026-02-05 11:03",
+      "code": "515080",
+      "name": "红利ETF",
+      "side": "SELL",
+      "amount": 0.0,
+      "price": 1.595
+    },
+    {
+      "date": "2026-02-05 11:03",
+      "code": "510300",
+      "name": "沪深300ETF",
+      "side": "SELL",
+      "amount": 0.0,
+      "price": 4.664
+    },
+    {
+      "date": "2026-02-05 11:03",
+      "code": "512980",
+      "name": "传媒ETF",
+      "side": "SELL",
+      "amount": 0.0,
+      "price": 1.187
+    },
+    {
+      "date": "2026-02-05 11:04",
+      "code": "512880",
+      "name": "证券ETF",
+      "side": "SELL",
+      "amount": 0.0,
+      "price": 1.184
+    },
+    {
+      "date": "2026-02-05 11:04",
+      "code": "512480",
+      "name": "半导体ETF",
+      "side": "SELL",
+      "amount": 0.0,
+      "price": 1.578
+    }
+  ],
+  "signal_record": {
+    "515080": [
+      {
+        "date": "02-05",
+        "s": "S"
+      }
+    ],
+    "510300": [
+      {
+        "date": "02-05",
+        "s": "S"
+      }
+    ],
+    "512980": [
+      {
+        "date": "02-05",
+        "s": "S"
+      }
+    ],
+    "512880": [
+      {
+        "date": "02-05",
+        "s": "S"
+      }
+    ],
+    "518880": [
+      {
+        "date": "02-05",
+        "s": "W"
+      }
+    ],
+    "515220": [
+      {
+        "date": "02-05",
+        "s": "W"
+      }
+    ],
+    "512480": [
+      {
+        "date": "02-05",
+        "s": "S"
+      }
+    ]
   }
 }
