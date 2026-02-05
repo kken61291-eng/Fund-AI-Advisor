@@ -892,6 +892,14 @@
       "side": "BUY",
       "amount": 250,
       "price": 1.129
+    },
+    {
+      "date": "2026-02-05 10:26",
+      "code": "512880",
+      "name": "证券ETF",
+      "side": "SELL",
+      "amount": 0.0,
+      "price": 1.188
     }
   ],
   "signal_record": {
