@@ -2,14 +2,11 @@ name: Daily AI Fund Advisor
 
 on:
   schedule:
-    - cron: '30 1 * * 1-5' # 北京时间 9:30 (保持不变)
-  workflow_dispatch:       # 手动触发 (保持不变，方便你测试)
-  
-  # --- 暂时关闭 PUSH 触发 ---
-  # push:
+    - cron: '30 1 * * 1-5' # 北京时间 9:30
+  workflow_dispatch:
+  # push: # 暂时关闭 push 触发，避免测试期频繁运行
   #   paths-ignore:
   #     - 'portfolio.json'
-  # ------------------------
 
 concurrency: 
   group: ${{ github.workflow }}
@@ -52,9 +49,15 @@ jobs:
         git config --global user.name "GitHub Action"
         git config --global user.email "action@github.com"
         
+        # 只有当 portfolio.json 发生变化时才提交
         if [[ -n $(git status --porcelain portfolio.json) ]]; then
           git add portfolio.json
           git commit -m "📈 Auto-update portfolio ledger [skip ci]"
+          
+          # --- 核心修复：拉取最新代码防止冲突 ---
+          git pull --rebase origin main
+          # ----------------------------------
+          
           git push
         else
           echo "No changes in portfolio."
