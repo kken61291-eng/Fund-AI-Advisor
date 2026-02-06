@@ -4,6 +4,7 @@ import os
 import re
 import time
 import akshare as ak
+import pandas as pd
 from datetime import datetime
 from utils import logger, retry
 
@@ -18,73 +19,132 @@ class NewsAnalyst:
         }
 
     def _format_short_time(self, time_str):
+        """统一时间格式为 MM-DD HH:MM"""
         try:
-            dt = datetime.strptime(str(time_str), "%Y-%m-%d %H:%M:%S")
-            return dt.strftime("%m-%d %H:%M")
+            # 处理标准格式 YYYY-MM-DD HH:MM:SS
+            if len(str(time_str)) > 10:
+                dt = datetime.strptime(str(time_str), "%Y-%m-%d %H:%M:%S")
+                return dt.strftime("%m-%d %H:%M")
+            # 处理仅时间格式 HH:MM:SS (假设是今天)
+            elif ":" in str(time_str):
+                return str(time_str)[:5]
+            return str(time_str)
         except:
-            s = str(time_str)
-            if len(s) > 10: return s[5:16]
-            return s
+            return str(time_str)[:11]
 
-    @retry(retries=2, delay=2)
-    def fetch_news_titles(self, keywords_str):
-        """
-        [V14.28] 关键词矩阵搜索 + 强制日志打印
-        """
-        if not keywords_str: return []
-        
-        keys = keywords_str.split()
-        news_list = []
-        fallback_list = [] 
-        
+    def _fetch_eastmoney_news(self):
+        """[源1] 获取东方财富要闻"""
+        raw_list = []
         try:
-            # 1. 获取要闻 (数据源)
             df = ak.stock_news_em(symbol="要闻")
             junk_words = ["汇总", "集锦", "收评", "早报", "公告", "提示", "复盘"]
             
             for _, row in df.iterrows():
                 title = str(row.get('title', ''))
                 raw_time = str(row.get('public_time', ''))
-                
                 if any(jw in title for jw in junk_words): continue
                 
                 time_str = self._format_short_time(raw_time)
-                item = f"[{time_str}] {title}"
-                
-                # 收集备选 (取前5条)
-                if len(fallback_list) < 5:
-                    fallback_list.append(item)
-
-                # OR 关系匹配
-                if any(k in title for k in keys):
-                    news_list.append(item)
-            
-            # [新增] 尝试获取板块新闻 (如果关键词没搜到)
-            if not news_list and len(keys) > 0:
-                try:
-                    # 尝试用第一个关键词作为板块去搜 (例如 '半导体')
-                    sector_key = keys[0]
-                    df_sector = ak.stock_news_em(symbol=sector_key) # 某些版本支持
-                    for _, row in df_sector.iterrows():
-                        title = str(row.get('title', ''))
-                        if any(jw in title for jw in junk_words): continue
-                        news_list.append(f"[板块] {title}")
-                        if len(news_list) >= 3: break
-                except:
-                    pass
-
-            final_list = news_list[:8] if news_list else [f"[市场背景] {x}" for x in fallback_list[:3]]
-            
-            # [V14.28 核心] 强制打印新闻到日志
-            logger.info(f"📰 [情报检索] 关键词:{keys} | 命中:{len(news_list)}")
-            for n in final_list:
-                logger.info(f"  > {n}")
-                
-            return final_list
-            
+                # 格式: [时间] (东财) 标题
+                raw_list.append({
+                    "text": f"[{time_str}] (东财) {title}",
+                    "pure_title": title,
+                    "timestamp": raw_time
+                })
         except Exception as e:
-            logger.warning(f"关键词搜索微瑕: {e}")
-            return ["数据源波动，参考宏观面。"]
+            logger.warning(f"东财源微瑕: {e}")
+        return raw_list
+
+    def _fetch_cls_telegraph(self):
+        """[源2] 获取财联社/财经社电报 (JSON流)"""
+        raw_list = []
+        try:
+            # 获取财联社电报数据
+            df = ak.stock_telegraph_cls()
+            
+            for _, row in df.iterrows():
+                title = str(row.get('title', ''))
+                content = str(row.get('content', ''))
+                raw_time = str(row.get('ctime', '')) # 财社通常用 ctime
+                
+                # 财社电报有时候没有标题，只有内容，取内容前30字作为标题
+                display_text = title if len(title) > 2 else content[:40]
+                
+                if not display_text: continue
+                
+                time_str = self._format_short_time(raw_time)
+                # 格式: [时间] (财社) 标题
+                raw_list.append({
+                    "text": f"[{time_str}] (财社) {display_text}",
+                    "pure_title": display_text,
+                    "timestamp": raw_time
+                })
+        except Exception as e:
+            # 财社接口偶尔不稳定，作为辅助源，失败不报错
+            logger.warning(f"财社源微瑕: {e}")
+        return raw_list
+
+    @retry(retries=2, delay=2)
+    def fetch_news_titles(self, keywords_str):
+        """
+        [V14.30] 双源情报融合 (东财 + 财社)
+        """
+        if not keywords_str: return []
+        keys = keywords_str.split()
+        
+        # 1. 并发获取双源数据
+        pool_em = self._fetch_eastmoney_news()
+        pool_cls = self._fetch_cls_telegraph()
+        
+        # 2. 融合情报池 (Fusion)
+        # 将两个列表合并
+        all_news_items = pool_em + pool_cls
+        
+        # 3. 按时间倒序排序 (确保看到最新的)
+        # 简单的字符串比较可能不够准，但在同一天内基本有效。
+        # 更好的方式是依赖 API 返回的顺序（通常都是最新的在最前）
+        # 这里我们直接交错合并或直接使用合并后的列表（假设API返回有序）
+        
+        hit_list = []
+        fallback_list = []
+        
+        seen_titles = set()
+
+        # 4. 关键词过滤 & 去重
+        for item in all_news_items:
+            # 简单去重：如果标题非常相似，跳过
+            if item['pure_title'] in seen_titles: continue
+            seen_titles.add(item['pure_title'])
+            
+            # 收集备选 (作为市场背景)
+            if len(fallback_list) < 5:
+                fallback_list.append(item['text'])
+            
+            # 关键词匹配
+            if any(k in item['pure_title'] for k in keys):
+                hit_list.append(item['text'])
+
+        # 5. 如果关键词没搜到，尝试板块搜索 (仅东财支持板块搜索)
+        if not hit_list and len(keys) > 0:
+            try:
+                sector_key = keys[0]
+                df_sector = ak.stock_news_em(symbol=sector_key)
+                for _, row in df_sector.iterrows():
+                    title = str(row.get('title', ''))
+                    time_str = self._format_short_time(str(row.get('public_time', '')))
+                    hit_list.append(f"[{time_str}] (板块) {title}")
+                    if len(hit_list) >= 3: break
+            except:
+                pass
+
+        final_list = hit_list[:10] if hit_list else [f"[市场背景] {x}" for x in fallback_list[:4]]
+        
+        # [V14.30] 打印融合后的情报日志
+        logger.info(f"📰 [双源情报] 关键词:{keys} | 东财:{len(pool_em)}条 | 财社:{len(pool_cls)}条 | 命中:{len(hit_list)}")
+        for n in final_list:
+            logger.info(f"  > {n}")
+            
+        return final_list
 
     def _clean_json(self, text):
         try:
@@ -132,7 +192,7 @@ class NewsAnalyst:
         1. **🦊 CGO (首席增长官)**
            - **背景**: 华尔街动量交易员，信仰"趋势为王"和"强者恒强"。
            - **任务**: 挖掘上涨逻辑。但如果【趋势DOWN】或【流动性枯竭】，你必须诚实地承认"风口已过"，不能强行看多。
-           - **行为**: 必须引用具体的【新闻】或【资金数据】来佐证观点。
+           - **行为**: 必须引用具体的【新闻】或【资金数据】来佐证观点。优先关注"(财社)"的快讯。
 
         2. **🐻 CRO (首席风控官)**
            - **背景**: 资深宏观策略师，信仰"均值回归"和"安全边际"。
@@ -159,7 +219,7 @@ class NewsAnalyst:
         payload = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.4, # 适度创造性，保持逻辑严密
+            "temperature": 0.4, 
             "max_tokens": 1200
         }
         
@@ -173,7 +233,7 @@ class NewsAnalyst:
                 
             raw_content = response.json()['choices'][0]['message']['content']
             
-            # [V14.26] 打印原始辩论记录
+            # 打印原始辩论记录
             logger.info(f"📝 [会议纪要 {fund_name}]:\n{raw_content}")
             
             data = json.loads(self._clean_json(raw_content))
