@@ -17,7 +17,6 @@ class NewsAnalyst:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
-        # 财联社专用请求头
         self.cls_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Referer": "https://www.cls.cn/telegraph",
@@ -25,14 +24,10 @@ class NewsAnalyst:
         }
 
     def _format_short_time(self, time_str):
-        """统一时间格式为 MM-DD HH:MM"""
         try:
-            # 处理时间戳 (财联社返回的是10位时间戳)
             if str(time_str).isdigit():
                 dt = datetime.fromtimestamp(int(time_str))
                 return dt.strftime("%m-%d %H:%M")
-            
-            # 处理标准格式字符串
             if len(str(time_str)) > 10:
                 dt = datetime.strptime(str(time_str), "%Y-%m-%d %H:%M:%S")
                 return dt.strftime("%m-%d %H:%M")
@@ -41,19 +36,15 @@ class NewsAnalyst:
             return str(time_str)[:11]
 
     def _fetch_eastmoney_news(self):
-        """[源1] 获取东方财富要闻 (akshare)"""
         raw_list = []
         try:
             df = ak.stock_news_em(symbol="要闻")
             junk_words = ["汇总", "集锦", "收评", "早报", "公告", "提示", "复盘"]
-            
             for _, row in df.iterrows():
                 title = str(row.get('title', ''))
                 raw_time = str(row.get('public_time', ''))
                 if any(jw in title for jw in junk_words): continue
-                
                 time_str = self._format_short_time(raw_time)
-                # 格式: [时间] (东财) 标题
                 raw_list.append({
                     "text": f"[{time_str}] (东财) {title}",
                     "pure_title": title,
@@ -64,89 +55,51 @@ class NewsAnalyst:
         return raw_list
 
     def _fetch_cls_telegraph(self):
-        """
-        [源2] 财联社电报 (官方API原生直连)
-        Target: https://www.cls.cn/nodeapi/telegraphList
-        """
         raw_list = []
         url = "https://www.cls.cn/nodeapi/telegraphList"
-        params = {
-            "rn": 30,  # 获取最新的30条
-            "sv": 7755 # 版本号，可选
-        }
-        
+        params = {"rn": 30, "sv": 7755}
         try:
-            # 直接请求官方接口
             resp = requests.get(url, headers=self.cls_headers, params=params, timeout=5)
-            
             if resp.status_code == 200:
                 data = resp.json()
                 if "data" in data and "roll_data" in data["data"]:
                     items = data["data"]["roll_data"]
-                    
                     for item in items:
                         title = item.get("title", "")
                         content = item.get("content", "")
-                        ctime = item.get("ctime", 0) # 时间戳
-                        
-                        # 财社特点：很多短快讯没有标题，只有 content
+                        ctime = item.get("ctime", 0)
                         display_text = title if title else content[:50].replace("\n", " ")
-                        
                         if not display_text: continue
-                        
                         time_str = self._format_short_time(ctime)
-                        
                         raw_list.append({
                             "text": f"[{time_str}] (财社) {display_text}",
                             "pure_title": display_text,
                             "timestamp": ctime
                         })
-                    logger.info(f"📡 [原生直连] 财联社获取成功: {len(raw_list)}条")
-                else:
-                    logger.warning("财联社接口返回结构异常")
-            else:
-                logger.warning(f"财联社接口状态码: {resp.status_code}")
-                
         except Exception as e:
             logger.warning(f"财社直连微瑕: {e}")
-            
         return raw_list
 
     @retry(retries=2, delay=2)
     def fetch_news_titles(self, keywords_str):
-        """
-        [V14.31] 双源情报融合 (东财akshare + 财社API直连)
-        """
         if not keywords_str: return []
         keys = keywords_str.split()
-        
-        # 1. 并发获取双源数据
         pool_em = self._fetch_eastmoney_news()
         pool_cls = self._fetch_cls_telegraph()
-        
-        # 2. 融合情报池
-        all_news_items = pool_cls + pool_em # 优先展示财社的（通常更快）
+        all_news_items = pool_cls + pool_em
         
         hit_list = []
         fallback_list = []
         seen_titles = set()
 
-        # 3. 关键词过滤 & 去重
         for item in all_news_items:
-            # 简单去重
-            clean_t = item['pure_title'].replace(" ", "")[:10] # 取前10个字去重
+            clean_t = item['pure_title'].replace(" ", "")[:10]
             if clean_t in seen_titles: continue
             seen_titles.add(clean_t)
-            
-            # 收集备选
-            if len(fallback_list) < 5:
-                fallback_list.append(item['text'])
-            
-            # 关键词匹配
+            if len(fallback_list) < 5: fallback_list.append(item['text'])
             if any(k in item['pure_title'] for k in keys):
                 hit_list.append(item['text'])
 
-        # 4. 板块兜底 (仅东财支持)
         if not hit_list and len(keys) > 0:
             try:
                 sector_key = keys[0]
@@ -160,11 +113,8 @@ class NewsAnalyst:
                 pass
 
         final_list = hit_list[:10] if hit_list else [f"[市场背景] {x}" for x in fallback_list[:4]]
-        
-        logger.info(f"📰 [情报融合] 关键词:{keys} | 财社直连:{len(pool_cls)} | 东财:{len(pool_em)} | 命中:{len(hit_list)}")
-        for n in final_list:
-            logger.info(f"  > {n}")
-            
+        logger.info(f"📰 [情报融合] 关键词:{keys} | 财社:{len(pool_cls)} | 东财:{len(pool_em)} | 命中:{len(hit_list)}")
+        for n in final_list: logger.info(f"  > {n}")
         return final_list
 
     def _clean_json(self, text):
@@ -178,31 +128,62 @@ class NewsAnalyst:
 
     @retry(retries=2, delay=2)
     def analyze_fund_v4(self, fund_name, tech_indicators, macro_summary, sector_news):
+        # 1. 基础数据提取
         score = tech_indicators.get('quant_score', 50)
         trend = tech_indicators.get('trend_weekly', '无趋势')
         valuation = tech_indicators.get('valuation_desc', '未知')
+        
+        # 2. 资金与量能
         obv_slope = tech_indicators.get('flow', {}).get('obv_slope', 0)
-        
         money_flow = "资金抢筹" if obv_slope > 1.0 else ("资金出逃" if obv_slope < -1.0 else "存量博弈")
-        vol_ratio = tech_indicators.get('risk_factors', {}).get('vol_ratio', 1.0)
         
-        if vol_ratio < 0.6: volume_status = "流动性枯竭"
-        elif vol_ratio < 0.8: volume_status = "缩量"
-        elif vol_ratio > 2.0: volume_status = "放量分歧"
-        else: volume_status = "温和"
+        vol_ratio = tech_indicators.get('risk_factors', {}).get('vol_ratio', 1.0)
+        if vol_ratio < 0.6: volume_status = "流动性枯竭 (极度缩量)"
+        elif vol_ratio < 0.8: volume_status = "缩量回调"
+        elif vol_ratio > 2.0: volume_status = "放量分歧/突破"
+        else: volume_status = "量能温和"
 
-        # [V14.26] 联邦投委会人设增强版 Prompt
+        # 3. [V14.32 新增] 战术三件套提取
+        rsi = tech_indicators.get('rsi', 50)
+        
+        # MACD 状态
+        macd_data = tech_indicators.get('macd', {})
+        macd_status = macd_data.get('trend', '未知')
+        macd_hist = macd_data.get('hist', 0)
+        
+        # 布林带位置
+        pct_b = tech_indicators.get('risk_factors', {}).get('bollinger_pct_b', 0.5)
+        if pct_b > 1.0: bollinger_status = "突破上轨 (极端强势)"
+        elif pct_b > 0.8: bollinger_status = "触及压力位"
+        elif pct_b < 0.0: bollinger_status = "跌破下轨 (极端弱势)"
+        elif pct_b < 0.2: bollinger_status = "触及支撑位"
+        else: bollinger_status = "中轨震荡"
+
+        # [V14.32] 全息硬数据 Prompt
         prompt = f"""
         你现在是【玄铁联邦投委会】的决策现场。
-        请基于以下【实盘档案】和【自查情报】，组织一场高水平的辩证会议。
+        请基于以下【实盘全息档案】和【自查情报】，组织一场高水平的辩证会议。
 
-        📁 **实盘档案 (Hard Data)**:
+        📁 **实盘全息档案 (Holographic Hard Data)**:
+        -------------------------------------------
+        【趋势定性】
         - 标的: {fund_name}
-        - 技术评分: {score} (基础分)
+        - 综合评分: {score}
+        - 周线趋势: {trend} (决定长期方向)
         - 估值状态: {valuation}
-        - 资金流向: {money_flow} (OBV斜率: {obv_slope:.2f})
+
+        【时机信号 (关键)】
+        - MACD状态: {macd_status} (Hist: {macd_hist})
+          * 金叉=进攻信号; 死叉=防守信号; 柱状缩短=变盘前兆。
+        - RSI (14): {rsi}
+          * >70超买(风险); <30超卖(反弹机会); 50附近(震荡)。
+        - 布林位置: {bollinger_status} (PctB: {pct_b})
+
+        【资金与量能】
+        - 资金意图: {money_flow} (OBV斜率: {obv_slope:.2f})
         - 量能状态: {volume_status} (VR: {vol_ratio})
-        - 周线趋势: {trend}
+          * 注意: 缩量上涨往往是背离，放量下跌往往是恐慌。
+        -------------------------------------------
 
         📰 **自查情报 (Intelligence)**:
         - 宏观背景: {macro_summary[:600]}
@@ -211,29 +192,29 @@ class NewsAnalyst:
         --- 🏛️ 参会人员与人设 ---
 
         1. **🦊 CGO (首席增长官)**
-           - **背景**: 华尔街动量交易员，信仰"趋势为王"和"强者恒强"。
-           - **任务**: 挖掘上涨逻辑。但如果【趋势DOWN】或【流动性枯竭】，你必须诚实地承认"风口已过"，不能强行看多。
-           - **行为**: 必须引用具体的【新闻】或【资金数据】来佐证观点。优先关注"(财社)"的快讯，因为它们往往是最新的。
+           - **信仰**: "趋势为王，量价先行"。
+           - **任务**: 寻找做多理由。重点关注【MACD金叉】、【RSI低位回升】、【OBV抢筹】。
+           - **限制**: 如果【MACD死叉】且【VR缩量】，必须承认"目前没有进攻信号"。
 
         2. **🐻 CRO (首席风控官)**
-           - **背景**: 资深宏观策略师，信仰"均值回归"和"安全边际"。
-           - **任务**: 泼冷水。但如果【量价齐升】且【估值低廉】，你必须承认"安全垫足够"，不能为了反对而反对。
-           - **行为**: 重点审查【背离】和【宏观压制】。
+           - **信仰**: "均值回归，安全第一"。
+           - **任务**: 寻找风险点。重点关注【RSI超买】、【顶背离】、【布林触顶】、【MACD死叉】。
+           - **限制**: 如果【估值低】且【量价齐升】，必须承认"安全边际足够"。
 
-        3. **⚖️ CIO (首席投资官/裁判)**
-           - **背景**: 绝对理性的决策机器。
+        3. **⚖️ CIO (首席投资官)**
+           - **信仰**: "数据不会撒谎"。
            - **任务**: 
-             1. 听取两人的辩论，判断谁更符合当下的【实盘数据】。
-             2. **独立验证**: 如果CGO说"量能健康"但VR<0.6，你要无情驳斥。
-             3. **收敛结论**: 给出最终的【策略修正分】(Adjustment)，并在加分/减分的基础上决定攻守方向。
+             1. **技术仲裁**: 当CGO喊多但MACD是死叉时，判定CGO"主观臆断"，予以驳回。
+             2. **逻辑收敛**: 如果数据出现【背离】（如缩量上涨），必须扣分。
+             3. **最终决策**: 给出【策略修正分】，决定是攻（加分）是守（减分）。
 
         --- 输出要求 (JSON) ---
         {{
-            "bull_view": "CGO: (引用数据/新闻)... 观点 (30字)",
-            "bear_view": "CRO: (引用风险点)... 观点 (30字)",
+            "bull_view": "CGO: (引用MACD/RSI/OBV)... 观点 (30字)",
+            "bear_view": "CRO: (引用背离/超买/趋势)... 观点 (30字)",
             "chairman_conclusion": "CIO: [判决理由]... 最终修正 (50字)",
             "adjustment": 整数数值 (-30 到 +30),
-            "risk_alert": "核心风险点"
+            "risk_alert": "核心风险点 (如: 量价背离 / 趋势破位)"
         }}
         """
 
@@ -253,9 +234,7 @@ class NewsAnalyst:
                 return self._fallback_result(sector_news)
                 
             raw_content = response.json()['choices'][0]['message']['content']
-            
             logger.info(f"📝 [会议纪要 {fund_name}]:\n{raw_content}")
-            
             data = json.loads(self._clean_json(raw_content))
             return {
                 "bull_say": data.get("bull_view", "..."),
@@ -272,7 +251,6 @@ class NewsAnalyst:
     def _fallback_result(self, news):
         return {"bull_say": "数据缺失", "bear_say": "风险未知", "comment": "连接中断", "adjustment": 0, "risk_alert": "API Error", "used_news": news}
 
-    # --- CIO 战略审计 ---
     @retry(retries=2, delay=2)
     def review_report(self, report_text):
         prompt = f"""
@@ -293,7 +271,6 @@ class NewsAnalyst:
         """
         return self._call_llm_text(prompt, "CIO 战略审计")
 
-    # --- 玄铁先生复盘 ---
     @retry(retries=2, delay=2)
     def advisor_review(self, report_text, macro_str):
         prompt = f"""
