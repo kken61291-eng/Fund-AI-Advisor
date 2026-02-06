@@ -28,6 +28,9 @@ class NewsAnalyst:
 
     @retry(retries=2, delay=2)
     def fetch_news_titles(self, keywords_str):
+        """
+        [V14.28] 关键词矩阵搜索 + 强制日志打印
+        """
         if not keywords_str: return []
         
         keys = keywords_str.split()
@@ -35,8 +38,9 @@ class NewsAnalyst:
         fallback_list = [] 
         
         try:
+            # 1. 获取要闻 (数据源)
             df = ak.stock_news_em(symbol="要闻")
-            junk_words = ["汇总", "集锦", "收评", "早报", "公告", "提示"]
+            junk_words = ["汇总", "集锦", "收评", "早报", "公告", "提示", "复盘"]
             
             for _, row in df.iterrows():
                 title = str(row.get('title', ''))
@@ -47,16 +51,36 @@ class NewsAnalyst:
                 time_str = self._format_short_time(raw_time)
                 item = f"[{time_str}] {title}"
                 
-                if len(fallback_list) < 3:
+                # 收集备选 (取前5条)
+                if len(fallback_list) < 5:
                     fallback_list.append(item)
 
+                # OR 关系匹配
                 if any(k in title for k in keys):
                     news_list.append(item)
             
-            if not news_list:
-                return [f"[市场背景] {x}" for x in fallback_list]
+            # [新增] 尝试获取板块新闻 (如果关键词没搜到)
+            if not news_list and len(keys) > 0:
+                try:
+                    # 尝试用第一个关键词作为板块去搜 (例如 '半导体')
+                    sector_key = keys[0]
+                    df_sector = ak.stock_news_em(symbol=sector_key) # 某些版本支持
+                    for _, row in df_sector.iterrows():
+                        title = str(row.get('title', ''))
+                        if any(jw in title for jw in junk_words): continue
+                        news_list.append(f"[板块] {title}")
+                        if len(news_list) >= 3: break
+                except:
+                    pass
+
+            final_list = news_list[:8] if news_list else [f"[市场背景] {x}" for x in fallback_list[:3]]
             
-            return news_list[:8] 
+            # [V14.28 核心] 强制打印新闻到日志
+            logger.info(f"📰 [情报检索] 关键词:{keys} | 命中:{len(news_list)}")
+            for n in final_list:
+                logger.info(f"  > {n}")
+                
+            return final_list
             
         except Exception as e:
             logger.warning(f"关键词搜索微瑕: {e}")
