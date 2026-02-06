@@ -24,14 +24,16 @@ def load_config():
 
 # [核心决策逻辑 - 显性化 CIO 策略]
 def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily, pos, strategy_type, fund_name):
-    # 1. 基础分 (技术面)
+    # 1. 基础技术分 (Base Score)
     base_score = tech.get('quant_score', 50)
     
-    # 2. 最终分 = 基础分 + CIO调整分
+    # 2. 最终分 (Final Score) = 基础分 + CIO主观修正
+    # CIO 的修正代表了对新闻面和宏观面的权重
     tactical_score = max(0, min(100, base_score + ai_adj))
     
-    # [V14.25] 打印决策算式
-    logger.info(f"🧮 [算分明细 {fund_name}] 基础分({base_score}) + CIO修正({ai_adj:+d}) = 最终分({tactical_score})")
+    # [V14.26] 打印决策算式，确保透明
+    action_str = "加分进攻" if ai_adj > 0 else ("减分防御" if ai_adj < 0 else "中性维持")
+    logger.info(f"🧮 [算分 {fund_name}] 技术面({base_score}) + CIO修正({ai_adj:+d} {action_str}) = 最终分({tactical_score})")
     
     tech['final_score'] = tactical_score
     tech['ai_adjustment'] = ai_adj
@@ -42,7 +44,7 @@ def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily
     tactical_mult = 0
     reasons = []
 
-    # 3. 基于最终分定级
+    # 3. 基于【最终分】定级
     if tactical_score >= 85: tactical_mult = 2.0; reasons.append("战术:极强")
     elif tactical_score >= 70: tactical_mult = 1.0; reasons.append("战术:走强")
     elif tactical_score >= 60: tactical_mult = 0.5; reasons.append("战术:企稳")
@@ -123,7 +125,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             risk = tech.get('risk_factors', {})
             final_score = tech.get('final_score', 0)
             ai_adj = tech.get('ai_adjustment', 0)
-            base_score = final_score - ai_adj
+            base_score = final_score - ai_adj # 反推基础分用于展示
             
             cro_signal = tech.get('tech_cro_signal', 'PASS')
             cro_comment = tech.get('tech_cro_comment', '无')
@@ -162,15 +164,21 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             chairman = ai_data.get('comment', '无')
 
             if bull_say and bear_say:
+                # [V14.26] UI增强：在主席区域明确展示加减分
+                adj_color = "#ff5252" if ai_adj > 0 else ("#69f0ae" if ai_adj < 0 else "#ccc")
                 committee_html = f"""
                 <div style="margin-top:12px;border-top:1px solid #444;padding-top:10px;">
-                    <div style="font-size:10px;color:#888;margin-bottom:6px;text-align:center;">--- 投委会辩论实录 ---</div>
+                    <div style="font-size:10px;color:#888;margin-bottom:6px;text-align:center;">--- 联邦投委会辩论 ---</div>
                     <div style="display:flex;gap:10px;margin-bottom:8px;">
-                        <div style="flex:1;background:rgba(27,94,32,0.2);padding:8px;border-radius:4px;border-left:2px solid #66bb6a;"><div style="color:#66bb6a;font-size:11px;font-weight:bold;margin-bottom:4px;">🦊 CGO</div><div style="color:#c8e6c9;font-size:11px;line-height:1.3;font-style:italic;">"{bull_say}"</div></div>
-                        <div style="flex:1;background:rgba(183,28,28,0.2);padding:8px;border-radius:4px;border-left:2px solid #ef5350;"><div style="color:#ef5350;font-size:11px;font-weight:bold;margin-bottom:4px;">🐻 CRO</div><div style="color:#ffcdd2;font-size:11px;line-height:1.3;font-style:italic;">"{bear_say}"</div></div>
+                        <div style="flex:1;background:rgba(27,94,32,0.2);padding:8px;border-radius:4px;border-left:2px solid #66bb6a;"><div style="color:#66bb6a;font-size:11px;font-weight:bold;margin-bottom:4px;">🦊 CGO (增长)</div><div style="color:#c8e6c9;font-size:11px;line-height:1.3;font-style:italic;">"{bull_say}"</div></div>
+                        <div style="flex:1;background:rgba(183,28,28,0.2);padding:8px;border-radius:4px;border-left:2px solid #ef5350;"><div style="color:#ef5350;font-size:11px;font-weight:bold;margin-bottom:4px;">🐻 CRO (风控)</div><div style="color:#ffcdd2;font-size:11px;line-height:1.3;font-style:italic;">"{bear_say}"</div></div>
                     </div>
                     <div style="background:linear-gradient(90deg, rgba(255,183,77,0.1) 0%, rgba(255,183,77,0.05) 100%);padding:10px;border-radius:4px;border:1px solid rgba(255,183,77,0.3);position:relative;">
-                        <div style="color:#ffb74d;font-size:12px;font-weight:bold;margin-bottom:4px;">⚖️ CIO 终审 (修正 {ai_adj:+d})</div><div style="color:#fff3e0;font-size:12px;line-height:1.4;">{chairman}</div>
+                        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                            <div style="color:#ffb74d;font-size:12px;font-weight:bold;">⚖️ CIO 终审</div>
+                            <div style="color:{adj_color};font-size:11px;font-weight:bold;">策略修正: {ai_adj:+d}</div>
+                        </div>
+                        <div style="color:#fff3e0;font-size:12px;line-height:1.4;">{chairman}</div>
                     </div>
                 </div>"""
 
@@ -181,7 +189,10 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             <div style="background:{bg_gradient};border-left:4px solid {border_color};margin-bottom:15px;padding:15px;border-radius:6px;box-shadow:0 4px 10px rgba(0,0,0,0.6);border-top:1px solid #333;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
                     <div><span style="font-size:18px;font-weight:bold;color:#f0e6d2;font-family:'Times New Roman',serif;">{r['name']}</span><span style="font-size:12px;color:#9ca3af;margin-left:5px;">{r['code']}</span></div>
-                    <div style="text-align:right;"><div style="color:#ffb74d;font-weight:bold;font-size:16px;text-shadow:0 0 5px rgba(255,183,77,0.3);">{final_score}</div><div style="font-size:9px;color:#666;">BASE: {base_score} | ADJ: {ai_adj:+d}</div></div>
+                    <div style="text-align:right;">
+                        <div style="color:#ffb74d;font-weight:bold;font-size:16px;text-shadow:0 0 5px rgba(255,183,77,0.3);">{final_score}</div>
+                        <div style="font-size:9px;color:#aaa;">BASE:{base_score} <span style="color:{'#ff5252' if ai_adj>0 else ('#69f0ae' if ai_adj<0 else '#777')}">{ai_adj:+d}</span></div>
+                    </div>
                 </div>
                 
                 <div style="background:rgba(0,0,0,0.3);padding:6px 10px;border-radius:4px;margin-bottom:10px;display:flex;align-items:center;border-left:2px solid {cro_border_color};">
@@ -208,7 +219,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
         except Exception as e:
             logger.error(f"渲染错误 {r.get('name')}: {e}")
 
-    # UI V14.21 Style
+    # [UI 核心] V14.21 样式：纯净黑底，白字
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
         body {{ background: #0a0a0a; color: #f0e6d2; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; max-width: 660px; margin: 0 auto; padding: 20px; }}
         .main-container {{ border: 2px solid #333; border-top: 5px solid #ffb74d; border-radius: 4px; padding: 20px; background: linear-gradient(180deg, #1b1b1b 0%, #000000 100%); }}
@@ -228,9 +239,11 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             border-radius: 2px; 
             box-shadow: 0 4px 10px rgba(0,0,0,0.3);
         }}
+        /* 强制CIO部分字体为纯白 */
         .cio-section p, .cio-section div, .cio-section h3 {{ color: #ffffff !important; line-height: 1.6; }}
         .cio-section h3 {{ color: #ffffff !important; border-bottom: 1px dashed #5c1818; padding-bottom: 5px; margin-top: 15px; margin-bottom: 8px; }}
 
+        /* 玄铁先生 风格 */
         .advisor-section {{ 
             background: #0f0f0f; 
             border: 1px solid #d4af37; 
@@ -241,6 +254,8 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             box-shadow: 0 0 10px rgba(212, 175, 55, 0.2); 
             position: relative;
         }}
+        
+        /* 强制玄铁先生部分字体为纯白，保留 Georgia 字体 */
         .advisor-section * {{ color: #ffffff !important; line-height: 1.6; font-family: 'Georgia', serif; }}
         .advisor-section h4 {{ color: #ffd700 !important; margin-top: 15px; margin-bottom: 8px; border-bottom: 1px dashed #333; padding-bottom: 4px; }}
 
@@ -250,7 +265,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
         <div class="main-container">
             <div class="header">
                 <h1 class="title">XUANTIE QUANT</h1>
-                <div class="subtitle">HEAVY SWORD, NO EDGE | V14.25 DIALECTIC LOG</div>
+                <div class="subtitle">HEAVY SWORD, NO EDGE | V14.26 DIALECTIC FEDERAL</div>
             </div>
             
             <div class="radar-panel">
@@ -288,8 +303,8 @@ def process_single_fund(fund, config, fetcher, scanner, tracker, val_engine, ana
         tech = TechnicalAnalyzer.calculate_indicators(data)
         if not tech: return None, "", []
         
-        # [V14.25] 打印硬指标，满足全日志需求
-        logger.info(f"📊 [硬数据 {fund['name']}] RSI:{tech.get('rsi')} | Trend:{tech.get('trend_weekly')} | VR:{tech.get('risk_factors',{}).get('vol_ratio')}")
+        # [V14.26] 日志增强：硬指标快照
+        logger.info(f"📊 [Hard Data {fund['name']}] RSI:{tech.get('rsi')} | VR:{tech.get('risk_factors',{}).get('vol_ratio')}")
 
         try:
             val_mult, val_desc = val_engine.get_valuation_status(fund.get('index_name'), fund.get('strategy_type'))
@@ -303,9 +318,8 @@ def process_single_fund(fund, config, fetcher, scanner, tracker, val_engine, ana
         
         if analyst and (pos['shares']>0 or tech['quant_score']>=60 or tech['quant_score']<=35):
             sector_news_list = analyst.fetch_news_titles(keyword)
-            # [V14.25] 打印抓取到的新闻
-            logger.info(f"📰 [情报检索 {fund['name']}] 命中新闻: {len(sector_news_list)}条")
-            for n in sector_news_list: logger.info(f"  - {n}")
+            # [V14.26] 日志增强：新闻快照
+            logger.info(f"📰 [News Snapshot {fund['name']}] Hit: {len(sector_news_list)}")
             
             ai_res = analyst.analyze_fund_v4(fund['name'], tech, macro_str, sector_news_list)
             ai_adj = ai_res.get('adjustment', 0)
@@ -317,6 +331,7 @@ def process_single_fund(fund, config, fetcher, scanner, tracker, val_engine, ana
                 else:
                     used_news.append({"title": n_str, "time": ""})
 
+        # 传递 fund_name 用于日志打印
         amt, lbl, is_sell, s_val = calculate_position_v13(
             tech, ai_adj, val_mult, val_desc, base_amt, max_daily, pos, fund.get('strategy_type'), fund['name']
         )
@@ -354,7 +369,7 @@ def main():
     tracker = PortfolioTracker()
     val_engine = ValuationEngine()
     
-    logger.info(">>> [V14.25] 启动玄铁量化 (Dialectical Logmaster)...")
+    logger.info(">>> [V14.26] 启动玄铁量化 (Dialectic Federal)...")
     tracker.confirm_trades()
     try: analyst = NewsAnalyst()
     except: analyst = None
@@ -392,6 +407,6 @@ def main():
         advisor_html = analyst.advisor_review(full_report, macro_str) if analyst else "<p>玄铁先生闭关中</p>"
         
         html = render_html_report_v13(all_news_seen, results, cio_html, advisor_html) 
-        send_email("🗡️ 玄铁量化 V14.25 最终决议", html)
+        send_email("🗡️ 玄铁量化 V14.26 最终决议", html)
 
 if __name__ == "__main__": main()
