@@ -1,0 +1,59 @@
+name: Data Crawler (Batch Updater)
+
+on:
+  schedule:
+    # UTC时间 1:30 - 7:30，对应北京时间 09:30 - 15:30
+    # 每小时的第30分钟执行一次 (涵盖开盘期间及收盘)
+    - cron: '30 1-7 * * 1-5'
+  workflow_dispatch: # 允许手动触发
+
+concurrency: 
+  group: data-crawler
+  cancel-in-progress: false
+
+jobs:
+  update_data:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Shanghai
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 🕷️ Run Batch Updater
+      env:
+        # 爬虫可能只需要基础配置，如果涉及通知可加邮件配置
+        TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+      run: |
+        # 运行您之前保存的 batch_updater.py
+        # 这个脚本里包含了"每抓一个板块休眠60秒"的逻辑
+        python batch_updater.py
+
+    - name: Commit and Push Data Cache
+      run: |
+        git config --global user.name "GitHub Action"
+        git config --global user.email "action@github.com"
+        
+        # 检查 data_cache 目录是否有变化
+        if [[ -n $(git status --porcelain data_cache/) ]]; then
+          git add data_cache/*.csv
+          git commit -m "💾 Auto-save market data cache [skip ci]"
+          
+          # [关键] 拉取最新代码防止与分析任务冲突
+          git pull --rebase origin main
+          git push
+        else
+          echo "No new data fetched."
+        fi
