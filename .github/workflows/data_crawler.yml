@@ -2,10 +2,9 @@ name: Data Crawler (Batch Updater)
 
 on:
   schedule:
-    # UTC时间 1:30 - 7:30，对应北京时间 09:30 - 15:30
-    # 每小时的第30分钟执行一次，负责搬运数据
+    # 北京时间 08:30 - 15:30 每小时爬取一次
     - cron: '30 0-7 * * 1-5'
-  workflow_dispatch: # 允许手动点击按钮触发
+  workflow_dispatch:
 
 concurrency: 
   group: data-crawler
@@ -32,34 +31,26 @@ jobs:
         pip install --upgrade pip
         pip install -r requirements.txt
 
-    # --- 任务 1: 抓取行情数据 (耗时较长，有休眠) ---
     - name: 🕷️ Run Market Data Crawler
       env:
+        # 如果爬虫需要 Tushare，请保留这个，不需要邮件变量
         TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
       run: |
         python batch_updater.py
 
-    # --- 任务 2: 抓取新闻数据 (速度较快) ---
     - name: 📡 Run News Crawler
       run: |
         python news_loader.py
 
-    # --- 提交所有数据 ---
-    - name: Commit and Push Data Cache
+    - name: Commit and Push Data
       run: |
         git config --global user.name "GitHub Action"
         git config --global user.email "action@github.com"
         
-        # 检查 data_cache (行情) 或 data_news (新闻) 是否有变化
         if [[ -n $(git status --porcelain data_cache/ data_news/) ]]; then
-          
-          # [关键] 同时添加两个目录
           git add data_cache/*.csv
           git add data_news/*.jsonl
-          
           git commit -m "💾 Auto-save market & news data [skip ci]"
-          
-          # 拉取最新代码防止冲突 (Rebase 模式)
           git pull --rebase origin main
           git push
         else
