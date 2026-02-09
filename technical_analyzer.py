@@ -16,7 +16,7 @@ class TechnicalAnalyzer:
     @staticmethod
     def _get_safe_default_indicators(error_msg="数据不足或计算错误"):
         """
-        [V15.7 修复] 返回一个默认的安全字典，防止 main.py 崩溃
+        [V15.11 修复] 返回一个默认的安全字典，防止 main.py 崩溃
         默认状态：0分 + VETO (一票否决)
         """
         return {
@@ -62,6 +62,15 @@ class TechnicalAnalyzer:
         if df is None or df.empty or len(df) < 30:
             return TechnicalAnalyzer._get_safe_default_indicators("K线数据不足(<30)")
 
+        # [关键修复] 确保列名全小写，防止 'Volume' vs 'volume' 错误
+        df.columns = [c.lower() for c in df.columns]
+        
+        # 再次检查关键列是否存在
+        required_cols = ['close', 'volume', 'high', 'low', 'open']
+        if not all(col in df.columns for col in required_cols):
+             logger.error(f"❌ 数据缺少关键列: {list(df.columns)}")
+             return TechnicalAnalyzer._get_safe_default_indicators("缺少关键列(OHLCV)")
+
         # --- [V14.28 逻辑保留] 全时段动态成交量投影 ---
         try:
             last_date = df.index[-1]
@@ -84,9 +93,9 @@ class TechnicalAnalyzer:
                     
                     projected_vol = original_vol * multiplier
                     
-                    # 修改数据
+                    # 修改数据 [修复类型警告]
                     vol_idx = df.columns.get_loc('volume')
-                    df.iloc[-1, vol_idx] = projected_vol
+                    df.iloc[-1, vol_idx] = float(projected_vol) 
                     
                     logger.info(f"⚖️ [动态量能投影] 交易{trade_mins}min | 乘数x{multiplier:.2f} | Vol预测: {int(original_vol)} -> {int(projected_vol)}")
                 else:
