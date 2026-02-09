@@ -84,11 +84,9 @@ class NewsAnalyst:
     def _clean_json(self, text):
         text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
         code_match = re.search(r'```json\s*(\{.*?\})\s*```', text, re.DOTALL)
-        if code_match:
-            return code_match.group(1)
+        if code_match: return code_match.group(1)
         obj_match = re.search(r'\{.*\}', text, re.DOTALL)
-        if obj_match:
-            return obj_match.group(0)
+        if obj_match: return obj_match.group(0)
         return "{}"
     
     def _clean_html(self, text):
@@ -124,7 +122,7 @@ class NewsAnalyst:
         - 风控指令: {fuse_msg}
         
         舆情因子:
-        - 相关新闻: {str(news)[:400]}
+        - 相关新闻: {str(news)[:2000]}
 
         --- 角色定义 ---
         1. **CGO (动量策略分析师)**
@@ -180,35 +178,37 @@ class NewsAnalyst:
 
     @retry(retries=2, delay=5)
     def review_report(self, report_text, macro_str):
-        """
-        [CIO 升级版]：合并了之前的宏观策略师职能
-        CIO 现在全权负责宏观周期定位和微观账户管理
-        """
+        # 注入当前日期，强制 AI 关注当下
+        current_date = datetime.now().strftime("%Y年%m月%d日")
+        
         prompt = f"""
         【系统角色】
         你是玄铁量化基金的 **CIO (首席投资官)**。
-        你现在拥有最高决策权，负责整合宏观周期与微观交易。
+        今天是 **{current_date}**。
+        你全权负责整合宏观周期与微观交易。
         
         【输入数据】
-        1. 宏观新闻流: {macro_str[:600]}
+        1. 今日宏观快讯 (来源: 实时抓取): 
+        {macro_str[:800]}
+        
         2. 基金持仓与交易报告: 
         {report_text}
         
         【任务要求 - 必须使用 DeepSeek-R1 思维链】
-        1. **宏观定调**: 首先判断当前处于什么周期（库存/信用/情绪）？今天的宏观新闻说明了什么？
-        2. **归因分析**: 今天的交易决策（买入/卖出）是否符合当前的宏观定调？
-        3. **战略指令**: 给明天的交易定下基调（进攻/防御/游击）。
+        1. **宏观定调**: 基于【今日宏观快讯】判断当前市场情绪（进攻/防御/震荡）。**禁止编造快讯中未提及的新闻。**
+        2. **归因分析**: 今天的交易决策是否符合上述宏观定调？
+        3. **战略指令**: 给明天的交易定下基调。
         
         【输出格式-HTML】
         <div class="cio-memo">
-            <h3 style="border-left: 4px solid #1a237e; padding-left: 10px;">宏观与周期定调</h3>
-            <p>(100字: 结合新闻流，判断当前市场所处的宏观象限。)</p>
+            <h3 style="border-left: 4px solid #1a237e; padding-left: 10px;">宏观与周期定调 ({current_date})</h3>
+            <p>(100字: 仅基于提供的快讯进行总结，不要引用过时数据。)</p>
             
             <h3 style="border-left: 4px solid #1a237e; padding-left: 10px;">交易归因审计</h3>
-            <p>(100字: 点评今日的交易是否理智，是否符合宏观大势。)</p>
+            <p>(100字: 点评今日交易的合理性。)</p>
             
             <h3 style="border-left: 4px solid #d32f2f; padding-left: 10px;">CIO 总攻令</h3>
-            <p>(80字: 下达明确的战略指令，如“全线进攻”、“防守反击”或“空仓避险”。)</p>
+            <p>(80字: 明确的战术指令。)</p>
         </div>
         """
         
@@ -229,35 +229,37 @@ class NewsAnalyst:
 
     @retry(retries=2, delay=5)
     def advisor_review(self, report_text, macro_str):
-        """
-        [顾问升级版]：独立审计员 (The Auditor)
-        他不再写宏观报告，而是作为"红军"去挑战 CIO 的决策。
-        他会模拟"自行搜索"（利用R1的知识库），寻找被忽略的风险。
-        """
+        # 注入当前日期
+        current_date = datetime.now().strftime("%Y年%m月%d日")
+        
         prompt = f"""
         【系统角色】
-        你是玄铁量化基金的 **独立顾问 (The Auditor)**。
-        你的职责不是附和 CIO，而是**质疑**和**验证**。你怀疑目前的新闻源可能不完整。
+        你是玄铁量化基金的 **独立审计顾问 (The Auditor)**。
+        今天是 **{current_date}**。
+        你的职责是基于**已知的真实信息**，寻找 CIO 决策中的逻辑漏洞。
         
         【输入数据】
-        CIO看到的宏观面: {macro_str[:500]}
-        CIO批准的交易: {report_text}
+        1. 真实捕捉到的宏观新闻: 
+        {macro_str[:800]}
         
-        【任务要求 - 模拟实盘验证】
-        请调动你内部的知识库（模拟自行搜索近期市场热点），进行以下“红军对抗”测试：
-        1. **盲点扫描**: 现在的市场有没有什么大事（如美联储动态、地缘政治、行业突发）是上述输入中**没提到**的？
-        2. **逻辑漏洞**: CIO 的决策是否存在逻辑硬伤？（比如宏观利空却在做多？）
-        3. **实盘推演**: 如果明天大盘暴跌 2%，目前的策略会发生什么？
+        2. CIO批准的交易: 
+        {report_text}
+        
+        【任务要求 - 红军对抗】
+        请进行严格的逻辑审计：
+        1. **信息完备性检查**: CIO 是否忽略了【真实捕捉到的宏观新闻】中的某条重磅利空/利好？（如果新闻列表为空或无重磅，请指出“当前缺乏关键宏观指引，建议谨慎”。**严禁编造新闻**。）
+        2. **逻辑一致性**: CIO 的交易方向是否与新闻情绪背离？（例如：新闻利空却做多）
+        3. **实盘推演**: 基于当前持仓，如果明日大盘波动，风险点在哪里？
         
         【输出格式-HTML结构化】
         <div class="advisor-report" style="background: #1a1a1a; padding: 15px; border: 1px dashed #ffd700;">
-            <h4 style="color: #ffd700;">🕵️ 独立审计报告 (Red Team)</h4>
+            <h4 style="color: #ffd700;">🕵️ 独立审计报告 ({current_date})</h4>
             
             <p><strong>[盲点警示]</strong>: <br>
-            (指出可能被忽略的市场风险或新闻线索，模拟你的独立调研结果。)</p>
+            (基于输入新闻的客观检查。若无重大遗漏，回答“基于现有资讯，未发现明显盲点”。)</p>
             
             <p><strong>[逻辑压力测试]</strong>: <br>
-            (针对今日交易的质疑。例如："CIO在加仓半导体，但忽略了...")</p>
+            (针对今日交易的质疑。)</p>
             
             <p><strong>[最终验证结论]</strong>: <br>
             (通过/有保留通过/建议驳回)</p>
@@ -268,7 +270,8 @@ class NewsAnalyst:
             "model": self.model_strategic,
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 4000,
-            "temperature": 0.5 # 温度稍高，增加发散性思维，模拟"搜索"
+            # [关键修改] 降低温度，抑制幻觉
+            "temperature": 0.2 
         }
         try:
             resp = requests.post(f"{self.base_url}/chat/completions", headers=self.headers, json=payload, timeout=180)
