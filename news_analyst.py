@@ -211,9 +211,9 @@ class NewsAnalyst:
 
         --- 输出要求 (JSON) ---
         {{
-            "bull_view": "CGO: (引用数据)... 观点 (30字)",
-            "bear_view": "CRO: (引用数据)... 观点 (30字)",
-            "chairman_conclusion": "CIO: [华尔街老兵视角]... 最终修正 (50字)",
+            "bull_view": "CGO: (引用数据)... 观点 (50字)",
+            "bear_view": "CRO: (引用数据)... 观点 (50字)",
+            "chairman_conclusion": "CIO: [华尔街老兵视角]... 最终修正 (80字)",
             "adjustment": 整数数值 (-30 到 +30),
             "risk_alert": "核心风险点"
         }}
@@ -275,7 +275,7 @@ class NewsAnalyst:
     @retry(retries=2, delay=2)
     def advisor_review(self, report_text, macro_str):
         prompt = f"""
-        你是 **【玄铁先生】**，一位冷峻的市场哲学家。
+        你是 **【玄铁先生】**，一位冷峻的市场哲学家。具有丰富的投资经验，独立查询近期新闻和ETF实盘验证报告可信度。
         请写一段【场外实战复盘】 (HTML)。
 
         【宏观】{macro_str[:1500]} 
