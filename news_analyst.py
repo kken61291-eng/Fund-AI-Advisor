@@ -16,14 +16,12 @@ class NewsAnalyst:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
-        # ... (Keep existing init code) ...
         self.cls_headers = {
             "User-Agent": "Mozilla/5.0",
             "Referer": "https://www.cls.cn/telegraph",
             "Origin": "https://www.cls.cn"
         }
 
-    # ... (Keep existing fetch news methods) ...
     def _format_short_time(self, time_str):
         try:
             if str(time_str).isdigit():
@@ -84,15 +82,20 @@ class NewsAnalyst:
         return hits[:8] if hits else l1[:3]
 
     def _clean_json(self, text):
-        think_match = re.search(r'<think>(.*?)</think>', text, re.DOTALL)
-        if think_match:
-            logger.info(f"🧠 [R1 Thought]: {think_match.group(1).strip()[:100]}...") 
-        
+        # [增强修复] 移除思维链，精准提取 JSON
         text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-        try:
-            match = re.search(r'\{.*\}', text, re.DOTALL)
-            return match.group(0) if match else "{}"
-        except: return "{}"
+        
+        # 尝试提取 ```json ... ``` 包裹的内容
+        code_match = re.search(r'```json\s*(\{.*?\})\s*```', text, re.DOTALL)
+        if code_match:
+            return code_match.group(1)
+            
+        # 尝试提取第一个 {...} 对象
+        obj_match = re.search(r'\{.*\}', text, re.DOTALL)
+        if obj_match:
+            return obj_match.group(0)
+            
+        return "{}"
     
     def _clean_html(self, text):
         text = text.replace("```html", "").replace("```", "").strip()
@@ -100,8 +103,6 @@ class NewsAnalyst:
 
     @retry(retries=1, delay=2)
     def analyze_fund_v5(self, fund_name, tech, macro, news, risk):
-        # ... (Keep prompt generation logic same as before) ...
-        # Copied for completeness
         fuse_level = risk['fuse_level']
         fuse_msg = risk['risk_msg']
         trend_score = tech.get('quant_score', 50)
@@ -134,27 +135,22 @@ class NewsAnalyst:
         --- 角色定义 ---
         1. **CGO (动量策略分析师)**
            - 核心职能: 右侧交易信号识别、赔率测算。
-           - 分析框架: 确认趋势(均线/MACD) -> 验证动量(RSI) -> 确认量能(VR>1.2)。
            - 纪律: 若趋势强度<50，直接输出HOLD。禁止模糊表述。
 
         2. **CRO (风控合规官)**
            - 核心职能: 左侧风险扫描、压力测试。
-           - 压力测试: 熔断硬约束(>=2否决)、流动性折价(VR<0.6)、技术背离。
            - 纪律: 必须证明"为什么现在不该做"。禁止与CGO妥协。
 
         3. **CIO (投资总监)**
            - 核心职能: 战术裁决、仓位配置。
-           - 决策矩阵: 
-             - 胜率<40% 或 赔率<1:1.5 -> 否决
-             - CRO风险等级=CRITICAL -> 否决
-             - 胜率>60% 且 风险可控 -> 批准
            - 纪律: 决策必须明确，禁止"观望"。
 
         【输出格式-严格JSON】
+        请只输出 JSON，不要包含 Markdown 格式标记。确保 JSON 格式合法。
         {{
-            "bull_view": "CGO观点 (50字): 动量质量评估与赔率测算。无废话。",
-            "bear_view": "CRO观点 (50字): 风险压力测试结果。无废话。",
-            "chairman_conclusion": "CIO裁决 (80字): 最终决策逻辑(胜率x赔率)。明确仓位建议与止损位。",
+            "bull_view": "CGO观点 (50字以内)",
+            "bear_view": "CRO观点 (50字以内)",
+            "chairman_conclusion": "CIO裁决 (80字以内)",
             "adjustment": 整数数值 (-30 到 +30)
         }}
         """
@@ -170,15 +166,17 @@ class NewsAnalyst:
         try:
             resp = requests.post(f"{self.base_url}/chat/completions", headers=self.headers, json=payload, timeout=90)
             
-            # [Debug Log]
             if resp.status_code != 200:
                 logger.error(f"⚠️ API Error {resp.status_code}: {resp.text}")
+                return {"bull_say": "API Error", "bear_say": "API Error", "comment": "API Error", "adjustment": 0}
             
             data = resp.json()
             if isinstance(data, str): data = json.loads(data)
             content = data['choices'][0]['message']['content']
             
-            result = json.loads(self._clean_json(content))
+            cleaned_json = self._clean_json(content)
+            result = json.loads(cleaned_json)
+            
             if "chairman_conclusion" in result and "comment" not in result:
                 result["comment"] = result["chairman_conclusion"]
             return result
@@ -186,10 +184,8 @@ class NewsAnalyst:
             logger.error(f"AI Analysis Failed {fund_name}: {e}")
             raise e
 
-    # ... (Keep review_report and advisor_review same as before) ...
     @retry(retries=2, delay=5)
     def review_report(self, report_text):
-        # (Same content as previous V15.6)
         prompt = f"""
         【系统角色】
         你是玄铁量化基金的 **CIO (投资总监)**。
@@ -199,21 +195,14 @@ class NewsAnalyst:
         全市场交易汇总:
         {report_text}
         
-        【深度分析要求 - 必须使用 DeepSeek-R1 思维链】
-        1. **收益归因**: 拆解Alpha来源（择时/选股/风格），识别是"运气"还是"能力"。
-        2. **风险归因**: 风险主要来自系统性暴露(Beta)还是特异性风险？是否在预算内？
-        3. **策略失效检测**: 当前市场Regime（如高波/低波/震荡）是否导致策略暂时失效？
-        
         【输出格式-HTML】
         <div class="cio-memo">
             <h3 style="border-left: 4px solid #1a237e; padding-left: 10px;">宏观环境审视</h3>
-            <p>(100字: 流动性评估与风险偏好审计。)</p>
-            
+            <p>(100字以内)</p>
             <h3 style="border-left: 4px solid #1a237e; padding-left: 10px;">收益与风险归因</h3>
-            <p>(100字: 基于数据的归因分析。拆解Alpha来源。)</p>
-            
+            <p>(100字以内)</p>
             <h3 style="border-left: 4px solid #d32f2f; padding-left: 10px;">CIO战术指令</h3>
-            <p>(80字: 总仓位控制、风险敞口调整与明日重点监控阈值。)</p>
+            <p>(80字以内)</p>
         </div>
         """
         
@@ -228,43 +217,28 @@ class NewsAnalyst:
             data = resp.json()
             if isinstance(data, str): data = json.loads(data)
             content = data['choices'][0]['message']['content']
-            
-            think_match = re.search(r'<think>(.*?)</think>', content, re.DOTALL)
-            if think_match:
-                logger.info(f"🧠 [CIO Thought]: {think_match.group(1).strip()[:200]}...")
-            
-            clean_content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
-            return self._clean_html(clean_content)
+            return self._clean_html(content)
         except:
             return "<p>CIO 正在进行深度战略审计...</p>"
 
     @retry(retries=2, delay=5)
     def advisor_review(self, report_text, macro_str):
-        # (Same content as previous V15.6)
         prompt = f"""
         【系统角色】
         你是玄铁量化基金的 **首席宏观策略师**。
-        你使用DeepSeek-R1的深度推理能力，识别非线性关系与预期差。
         
         【输入数据】
         宏观背景: {macro_str[:400]}
         市场数据: {report_text}
         
-        【推理要求 - 必须使用 DeepSeek-R1 思维链】
-        1. **周期定位**: 当前处于三周期（库存/信用/货币）的什么阶段？历史对标？
-        2. **预期差识别**: 市场当前price in了什么宏观假设？哪些存在修正风险？
-        3. **策略映射**: 基于周期位置，最优配置策略是什么？（哑铃/杠铃/卫星）
-        
         【输出格式-HTML结构化】
         <div class="macro-report">
             <h4 style="color: #ffd700;">【势·周期定位】</h4>
-            <p>(100字: 库存/信用/货币周期定位。历史对标。)</p>
-            
+            <p>(100字以内)</p>
             <h4 style="color: #ffd700;">【术·预期差分析】</h4>
-            <p>(100字: 市场隐含假设与潜在修正风险点。)</p>
-            
+            <p>(100字以内)</p>
             <h4 style="color: #ffd700;">【断·战略配置】</h4>
-            <p>(80字: 基于周期的配置框架与战术偏离建议。)</p>
+            <p>(80字以内)</p>
         </div>
         """
         
@@ -279,12 +253,6 @@ class NewsAnalyst:
             data = resp.json()
             if isinstance(data, str): data = json.loads(data)
             content = data['choices'][0]['message']['content']
-            
-            think_match = re.search(r'<think>(.*?)</think>', content, re.DOTALL)
-            if think_match:
-                logger.info(f"🧠 [Strategist Thought]: {think_match.group(1).strip()[:200]}...")
-            
-            clean_content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
-            return self._clean_html(clean_content)
+            return self._clean_html(content)
         except:
             return "<p>首席策略师正在闭关推演...</p>"
