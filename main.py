@@ -22,16 +22,36 @@ def load_config():
         logger.error(f"配置文件读取失败: {e}")
         return {"funds": [], "global": {"base_invest_amount": 1000, "max_daily_invest": 5000}}
 
-def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily, pos, strategy_type, fund_name):
+# [修改点 1] 增加 ai_decision 参数，并实现“圣旨”逻辑
+def calculate_position_v13(tech, ai_adj, ai_decision, val_mult, val_desc, base_amt, max_daily, pos, strategy_type, fund_name):
     base_score = tech.get('quant_score', 50)
     
     if DEBUG_MODE:
         logger.info(f"🔍 [DEBUG] {fund_name} 基础分细节: {tech.get('quant_reasons', [])}")
 
+    # 1. 初始计算：基础分 + AI微调
     tactical_score = max(0, min(100, base_score + ai_adj))
     action_str = "加分进攻" if ai_adj > 0 else ("减分防御" if ai_adj < 0 else "中性维持")
-    logger.info(f"🧮 [算分 {fund_name}] 技术面({base_score}) + CIO修正({ai_adj:+d} {action_str}) = 最终分({tactical_score})")
+    logger.info(f"🧮 [算分 {fund_name}] 技术面({base_score}) + CIO修正({ai_adj:+d} {action_str}) = 初步分({tactical_score})")
     
+    # 2. [核心逻辑] CIO 一票否决权 (Override)
+    override_reason = ""
+    original_score = tactical_score
+    
+    if ai_decision == "REJECT":
+        # 否决：直接归零，强制空仓或卖出信号
+        tactical_score = 0 
+        override_reason = "⛔ CIO指令:REJECT (强制否决)"
+    elif ai_decision == "HOLD":
+        # 观望：如果分数在买入区(>=60)，强制压回观望区(59)
+        if tactical_score >= 60:
+            tactical_score = 59
+            override_reason = "⏸️ CIO指令:HOLD (强制观望)"
+            
+    if override_reason:
+        logger.warning(f"⚠️ [CIO介入 {fund_name}] 原分{original_score} -> {override_reason} -> 修正后: {tactical_score}")
+
+    # 3. 记录最终状态
     tech['final_score'] = tactical_score
     tech['ai_adjustment'] = ai_adj
     tech['valuation_desc'] = val_desc
@@ -40,11 +60,13 @@ def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily
     tactical_mult = 0
     reasons = []
 
+    # 4. 根据修正后的分数定档
     if tactical_score >= 85: tactical_mult = 2.0; reasons.append("战术:极强")
     elif tactical_score >= 70: tactical_mult = 1.0; reasons.append("战术:走强")
     elif tactical_score >= 60: tactical_mult = 0.5; reasons.append("战术:企稳")
     elif tactical_score <= 25: tactical_mult = -1.0; reasons.append("战术:破位")
 
+    # 5. 结合估值系数
     final_mult = tactical_mult
     if tactical_mult > 0:
         if val_mult < 0.5: final_mult = 0; reasons.append(f"战略:高估刹车")
@@ -56,16 +78,19 @@ def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily
         if val_mult >= 1.5 and strategy_type in ['core', 'dividend']:
             final_mult = 0.5; reasons.append(f"战略:左侧定投")
 
+    # 6. 传统技术风控 (CRO)
     if cro_signal == "VETO":
         if final_mult > 0:
             final_mult = 0
             reasons.append(f"🛡️风控:否决买入")
             logger.info(f"🚫 [风控拦截 {fund_name}] 触发: {tech.get('tech_cro_comment')}")
     
+    # 7. 锁仓规则
     held_days = pos.get('held_days', 999)
     if final_mult < 0 and pos['shares'] > 0 and held_days < 7:
         final_mult = 0; reasons.append(f"规则:锁仓({held_days}天)")
 
+    # 8. 计算最终金额
     final_amt = 0; is_sell = False; sell_val = 0; label = "观望"
     if final_mult > 0:
         amt = int(base_amt * final_mult)
@@ -80,10 +105,8 @@ def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily
     if reasons: tech['quant_reasons'] = reasons
     return final_amt, label, is_sell, sell_val
 
-# [核心修复] 找回丢失的 UI 渲染代码
 def render_html_report_v13(all_news, results, cio_html, advisor_html):
     news_html = ""
-    # 简单处理新闻列表
     if isinstance(all_news, list):
         for i, news in enumerate(all_news[:15]):
             title = news.get('title', str(news))
@@ -210,9 +233,11 @@ def process_single_fund(fund, config, fetcher, tracker, val_engine, analyst, mar
                 logger.error(f"AI Analysis Failed: {e}")
                 ai_res = {"bull_view": "Error", "bear_view": "Error", "comment": "Offline", "adjustment": 0}
 
-        # 5. 算分与决策
+        # 5. [修改点 2] 提取 AI 决策并传递给算分函数
+        ai_decision = ai_res.get('decision', 'PASS') # 默认为PASS/HOLD，不强制干预
+        
         amt, lbl, is_sell, s_val = calculate_position_v13(
-            tech, ai_adj, val_mult, val_desc, base_amt, max_daily, pos, fund.get('strategy_type'), fund['name']
+            tech, ai_adj, ai_decision, val_mult, val_desc, base_amt, max_daily, pos, fund.get('strategy_type'), fund['name']
         )
         
         # 6. 记账
@@ -252,11 +277,9 @@ def main():
     market_context = analyst.get_market_context() if analyst else "无新闻数据"
     logger.info(f"🌍 舆情上下文长度: {len(market_context)} 字符")
     
-    # 构造新闻列表供 UI 展示
     all_news_seen = []
     if market_context and market_context != "今日暂无重大新闻。":
-        for line in market_context.split('\n')[:20]: # 取前20条展示
-            # 简单解析 [时间] 标题
+        for line in market_context.split('\n')[:20]: 
             try:
                 parts = line.split('] ', 1)
                 if len(parts) == 2:
@@ -289,7 +312,6 @@ def main():
         cio_html = analyst.review_report(full_report, market_context) if analyst else "<p>CIO Missing</p>"
         advisor_html = analyst.advisor_review(full_report, market_context) if analyst else "<p>Advisor Offline</p>"
         
-        # [关键] 调用修复后的 render 函数
         html = render_html_report_v13(all_news_seen, results, cio_html, advisor_html) 
         
         send_email("🗡️ 玄铁量化 V15.14 铁拳决议 (Full Context)", html, attachment_path=LOG_FILENAME)
