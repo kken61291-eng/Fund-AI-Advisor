@@ -1,15 +1,21 @@
 {
   "510300": {
     "name": "沪深300ETF",
-    "shares": 212.6754572522331,
-    "cost": 4.702,
-    "held_days": 1,
+    "shares": 637.6648325178514,
+    "cost": 4.7047,
+    "held_days": 2,
     "history": [
       {
         "date": "2026-02-09",
         "price": 4.702,
         "s": "B",
         "amt": 1000
+      },
+      {
+        "date": "2026-02-09",
+        "price": 4.706,
+        "s": "B",
+        "amt": 2000
       }
     ]
   },
@@ -17,7 +23,7 @@
     "name": "红利ETF",
     "shares": 636.5372374283896,
     "cost": 3.142,
-    "held_days": 1,
+    "held_days": 2,
     "history": [
       {
         "date": "2026-02-09",
@@ -31,7 +37,7 @@
     "name": "游戏ETF",
     "shares": 324.88628979857054,
     "cost": 1.539,
-    "held_days": 1,
+    "held_days": 2,
     "history": [
       {
         "date": "2026-02-09",
@@ -45,7 +51,7 @@
     "name": "煤炭ETF",
     "shares": 1773.0496453900712,
     "cost": 1.128,
-    "held_days": 1,
+    "held_days": 2,
     "history": [
       {
         "date": "2026-02-09",
@@ -59,13 +65,41 @@
     "name": "黄金ETF",
     "shares": 96.55305590421938,
     "cost": 10.357,
-    "held_days": 1,
+    "held_days": 2,
     "history": [
       {
         "date": "2026-02-09",
         "price": 10.357,
         "s": "B",
         "amt": 1000
+      }
+    ]
+  },
+  "159915": {
+    "name": "创业板ETF",
+    "shares": 152.11439002129603,
+    "cost": 3.287,
+    "held_days": 1,
+    "history": [
+      {
+        "date": "2026-02-09",
+        "price": 3.287,
+        "s": "B",
+        "amt": 500
+      }
+    ]
+  },
+  "512480": {
+    "name": "半导体ETF",
+    "shares": 310.9452736318408,
+    "cost": 1.608,
+    "held_days": 1,
+    "history": [
+      {
+        "date": "2026-02-09",
+        "price": 1.608,
+        "s": "B",
+        "amt": 500
       }
     ]
   }
