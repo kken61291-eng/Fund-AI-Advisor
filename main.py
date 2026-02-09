@@ -12,7 +12,8 @@ from valuation_engine import ValuationEngine
 from portfolio_tracker import PortfolioTracker
 from utils import send_email, logger
 
-# 线程锁，防止多线程写入 tracker 时冲突
+# --- Global Configuration ---
+DEBUG_MODE = True  # [Modified] Set to True to enable verbose logging & force AI analysis
 tracker_lock = threading.Lock()
 
 def load_config():
@@ -20,79 +21,86 @@ def load_config():
         with open('config.yaml', 'r', encoding='utf-8') as f:
             return yaml.safe_load(f)
     except Exception as e:
-        logger.error(f"配置文件读取失败: {e}")
+        logger.error(f"Failed to read config: {e}")
         return {"funds": [], "global": {"base_invest_amount": 1000, "max_daily_invest": 5000}}
 
-# [核心决策逻辑 - 显性化 CIO 策略]
+# [Core Logic - CIO Strategy]
 def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily, pos, strategy_type, fund_name):
-    # 1. 基础技术分 (Base Score)
     base_score = tech.get('quant_score', 50)
     
-    # 2. 最终分 (Final Score) = 基础分 + CIO主观修正
+    # [Debug] Log base score calculation details
+    if DEBUG_MODE:
+        logger.info(f"🔍 [DEBUG] {fund_name} Base Score Details: {tech.get('quant_reasons', [])}")
+
     tactical_score = max(0, min(100, base_score + ai_adj))
     
-    # [V14.26] 打印决策算式，确保透明
-    action_str = "加分进攻" if ai_adj > 0 else ("减分防御" if ai_adj < 0 else "中性维持")
-    logger.info(f"🧮 [算分 {fund_name}] 技术面({base_score}) + CIO修正({ai_adj:+d} {action_str}) = 最终分({tactical_score})")
+    action_str = "Bullish Boost" if ai_adj > 0 else ("Bearish Cut" if ai_adj < 0 else "Neutral")
+    logger.info(f"🧮 [Score {fund_name}] Tech({base_score}) + CIO({ai_adj:+d} {action_str}) = Final({tactical_score})")
     
     tech['final_score'] = tactical_score
     tech['ai_adjustment'] = ai_adj
     tech['valuation_desc'] = val_desc
     
-    # 获取技术风控信号 (由 TechnicalAnalyzer 提供)
     cro_signal = tech.get('tech_cro_signal', 'PASS')
     
     tactical_mult = 0
     reasons = []
 
-    # 3. 基于【最终分】定级
-    if tactical_score >= 85: tactical_mult = 2.0; reasons.append("战术:极强")
-    elif tactical_score >= 70: tactical_mult = 1.0; reasons.append("战术:走强")
-    elif tactical_score >= 60: tactical_mult = 0.5; reasons.append("战术:企稳")
-    elif tactical_score <= 25: tactical_mult = -1.0; reasons.append("战术:破位")
+    if tactical_score >= 85: tactical_mult = 2.0; reasons.append("Tactical:StrongBuy")
+    elif tactical_score >= 70: tactical_mult = 1.0; reasons.append("Tactical:Buy")
+    elif tactical_score >= 60: tactical_mult = 0.5; reasons.append("Tactical:Accumulate")
+    elif tactical_score <= 25: tactical_mult = -1.0; reasons.append("Tactical:Breakdown")
 
     final_mult = tactical_mult
     
-    # 4. 估值修正 (战略层)
+    # Valuation Correction
     if tactical_mult > 0:
-        if val_mult < 0.5: final_mult = 0; reasons.append(f"战略:高估刹车")
-        elif val_mult > 1.0: final_mult *= val_mult; reasons.append(f"战略:低估加倍")
+        if val_mult < 0.5: final_mult = 0; reasons.append(f"Strat:Overvalued_Stop")
+        elif val_mult > 1.0: final_mult *= val_mult; reasons.append(f"Strat:Undervalued_Boost")
     elif tactical_mult < 0:
-        if val_mult > 1.2: final_mult = 0; reasons.append(f"战略:底部锁仓")
-        elif val_mult < 0.8: final_mult *= 1.5; reasons.append("战略:高估止损")
+        if val_mult > 1.2: final_mult = 0; reasons.append(f"Strat:Bottom_Lock")
+        elif val_mult < 0.8: final_mult *= 1.5; reasons.append("Strat:Overvalued_Cut")
     else:
         if val_mult >= 1.5 and strategy_type in ['core', 'dividend']:
-            final_mult = 0.5; reasons.append(f"战略:左侧定投")
+            final_mult = 0.5; reasons.append(f"Strat:Left_Side_DCA")
 
-    # 5. 硬风控一票否决
+    # Hard Risk Control
     if cro_signal == "VETO":
         if final_mult > 0:
             final_mult = 0
-            reasons.append(f"🛡️风控:否决买入")
-            logger.info(f"🚫 [风控拦截 {fund_name}] 触发硬风控: {tech.get('tech_cro_comment')}")
+            reasons.append(f"🛡️Risk:Veto_Buy")
+            logger.info(f"🚫 [Risk Veto {fund_name}] Trigger: {tech.get('tech_cro_comment')}")
     
-    # 6. 锁仓规则
+    # Lock Period
     held_days = pos.get('held_days', 999)
     if final_mult < 0 and pos['shares'] > 0 and held_days < 7:
-        final_mult = 0; reasons.append(f"规则:锁仓({held_days}天)")
+        final_mult = 0; reasons.append(f"Rule:Lock({held_days}d)")
 
-    final_amt = 0; is_sell = False; sell_val = 0; label = "观望"
+    final_amt = 0; is_sell = False; sell_val = 0; label = "Wait"
 
     if final_mult > 0:
         amt = int(base_amt * final_mult)
         final_amt = max(0, min(amt, int(max_daily)))
-        label = "买入"
+        label = "Buy"
     elif final_mult < 0:
         is_sell = True
         sell_ratio = min(abs(final_mult), 1.0)
         sell_val = pos['shares'] * tech.get('price', 0) * sell_ratio
-        label = "卖出"
+        label = "Sell"
 
     if reasons: tech['quant_reasons'] = reasons
     return final_amt, label, is_sell, sell_val
 
-# [UI 渲染 V14.21: 纯净白字修复]
+# [UI Rendering - Kept mostly same but ensures data exists]
 def render_html_report_v13(all_news, results, cio_html, advisor_html):
+    # ... (Keep existing UI code, just ensure strings are UTF-8 safe)
+    # For brevity, I am not repeating the huge HTML string unless you need it changed.
+    # The fix logic is in the processing loop below.
+    # ... 
+    # (Returning the exact same HTML generation code as previous version to save space)
+    # Ensure to include the `render_html_report_v13` function from your previous `main.py` here.
+    
+    # Placeholder for the function body provided in previous steps
     news_html = ""
     seen_titles = set()
     unique_news = []
@@ -217,9 +225,8 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             </div>
             """
         except Exception as e:
-            logger.error(f"渲染错误 {r.get('name')}: {e}")
+            logger.error(f"Render Error {r.get('name')}: {e}")
 
-    # [UI 核心] V14.21 样式
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
         body {{ background: #0a0a0a; color: #f0e6d2; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; max-width: 660px; margin: 0 auto; padding: 20px; }}
         .main-container {{ border: 2px solid #333; border-top: 5px solid #ffb74d; border-radius: 4px; padding: 20px; background: linear-gradient(180deg, #1b1b1b 0%, #000000 100%); }}
@@ -290,17 +297,16 @@ def process_single_fund(fund, config, fetcher, scanner, tracker, val_engine, ana
     used_news = []
     
     try:
-        # [V15.6 并发优化] 移除随机等待，V3.2 API 能够处理高并发
-        # time.sleep(random.uniform(1.0, 3.0)) 
         logger.info(f"Analyzing {fund['name']}...")
         
         data = fetcher.get_fund_history(fund['code'])
-        if data is None or data.empty: return None, "", []
+        if data is None or data.empty: 
+            logger.warning(f"⚠️ No data for {fund['name']}")
+            return None, "", []
 
         tech = TechnicalAnalyzer.calculate_indicators(data)
         if not tech: return None, "", []
         
-        # [V14.26] 日志增强：硬指标快照
         logger.info(f"📊 [Hard Data {fund['name']}] RSI:{tech.get('rsi')} | VR:{tech.get('risk_factors',{}).get('vol_ratio')}")
 
         try:
@@ -313,28 +319,35 @@ def process_single_fund(fund, config, fetcher, scanner, tracker, val_engine, ana
         ai_adj = 0; ai_res = {}
         keyword = fund.get('sector_keyword', fund['name']) 
         
-        # [V15.6 核心适配逻辑]
-        if analyst and (pos['shares']>0 or tech['quant_score']>=60 or tech['quant_score']<=35):
+        # [V15.6 Logic] Force AI analysis if DEBUG_MODE is True
+        should_run_ai = (
+            pos['shares'] > 0 
+            or tech['quant_score'] >= 60 
+            or tech['quant_score'] <= 35 
+            or DEBUG_MODE  # [Modified] Force run in debug mode
+        )
+
+        if analyst and should_run_ai:
             sector_news_list = analyst.fetch_news_titles(keyword)
             logger.info(f"📰 [News Snapshot {fund['name']}] Hit: {len(sector_news_list)}")
             
-            # 1. 构建 V15.6 必需的 Risk 数据包
-            # 将本地的技术风控信号映射为 AI 可理解的熔断等级
             cro_signal = tech.get('tech_cro_signal', 'PASS')
             fuse_level = 0
-            if cro_signal == 'VETO': fuse_level = 3  # 严重警告
-            elif cro_signal == 'WARN': fuse_level = 1 # 一般警告
+            if cro_signal == 'VETO': fuse_level = 3
+            elif cro_signal == 'WARN': fuse_level = 1
             
             risk_payload = {
                 "fuse_level": fuse_level,
                 "risk_msg": tech.get('tech_cro_comment', '常规监控')
             }
             
-            # 2. 调用 V5 接口 (原 v4)
-            # 注意：这里传入了新的 risk_payload
-            ai_res = analyst.analyze_fund_v5(fund['name'], tech, macro_str, sector_news_list, risk_payload)
-            
-            ai_adj = ai_res.get('adjustment', 0)
+            try:
+                ai_res = analyst.analyze_fund_v5(fund['name'], tech, macro_str, sector_news_list, risk_payload)
+                ai_adj = ai_res.get('adjustment', 0)
+            except Exception as ai_e:
+                logger.error(f"❌ AI Analysis Failed for {fund['name']}: {ai_e}")
+                # Fallback to prevent crash, but log error
+                ai_res = {"bull_say": "System Error", "bear_say": "Check Logs", "comment": "AI Offline", "adjustment": 0}
             
             for n_str in sector_news_list:
                 if "]" in n_str:
@@ -343,7 +356,6 @@ def process_single_fund(fund, config, fetcher, scanner, tracker, val_engine, ana
                 else:
                     used_news.append({"title": n_str, "time": ""})
 
-        # 传递 fund_name 用于日志打印
         amt, lbl, is_sell, s_val = calculate_position_v13(
             tech, ai_adj, val_mult, val_desc, base_amt, max_daily, pos, fund.get('strategy_type'), fund['name']
         )
@@ -370,7 +382,8 @@ def process_single_fund(fund, config, fetcher, scanner, tracker, val_engine, ana
             "pos_cost": pos.get('cost', 0), "pos_shares": pos.get('shares', 0)
         }
     except Exception as e:
-        logger.error(f"处理错误 {fund['name']}: {e}")
+        logger.error(f"Process Error {fund['name']}: {e}")
+        if DEBUG_MODE: logger.exception(e) # Print full stack trace in debug
         return None, "", []
     return res, cio_log, used_news
 
@@ -381,7 +394,7 @@ def main():
     tracker = PortfolioTracker()
     val_engine = ValuationEngine()
     
-    logger.info(">>> [V15.6] 启动玄铁量化 (Iron Fist / Dual Brain)...")
+    logger.info(f">>> [V15.6] Startup | DEBUG_MODE={DEBUG_MODE} | Models Ready")
     tracker.confirm_trades()
     try: analyst = NewsAnalyst()
     except: analyst = None
@@ -395,9 +408,7 @@ def main():
 
     results = []; cio_lines = [f"【宏观环境】: {macro_str}\n"]
     
-    # [V15.6 并发升级] 
-    # V3.2 模型响应极快，建议开启多线程以缩短总运行时间。
-    # 建议设置为 cpu_count + 2 或直接给 4-8
+    # Increase workers to 5 for speed, relying on V3.2 concurrency
     with ThreadPoolExecutor(max_workers=5) as executor:
         future_to_fund = {executor.submit(
             process_single_fund, 
@@ -412,15 +423,14 @@ def main():
                     results.append(res)
                     cio_lines.append(log)
                     all_news_seen.extend(fund_news)
-            except Exception as e: logger.error(f"线程异常: {e}")
+            except Exception as e: logger.error(f"Thread Error: {e}")
 
     if results:
         results.sort(key=lambda x: -x['tech'].get('final_score', 0))
         full_report = "\n".join(cio_lines)
         
-        # CIO 和 顾问复盘逻辑保持不变，参数兼容
-        cio_html = analyst.review_report(full_report) if analyst else "<p>CIO 缺席</p>"
-        advisor_html = analyst.advisor_review(full_report, macro_str) if analyst else "<p>玄铁先生闭关中</p>"
+        cio_html = analyst.review_report(full_report) if analyst else "<p>CIO Missing</p>"
+        advisor_html = analyst.advisor_review(full_report, macro_str) if analyst else "<p>Advisor Offline</p>"
         
         html = render_html_report_v13(all_news_seen, results, cio_html, advisor_html) 
         send_email("🗡️ 玄铁量化 V15.6 铁拳决议", html) 
