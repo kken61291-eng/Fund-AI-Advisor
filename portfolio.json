@@ -3,7 +3,7 @@
     "name": "沪深300ETF",
     "shares": 2544.804213598009,
     "cost": 4.7155,
-    "held_days": 10,
+    "held_days": 11,
     "history": [
       {
         "date": "2026-02-09",
@@ -71,7 +71,7 @@
     "name": "红利ETF",
     "shares": 1120.156833744242,
     "cost": 2.2318,
-    "held_days": 10,
+    "held_days": 11,
     "history": [
       {
         "date": "2026-02-09",
@@ -91,7 +91,7 @@
     "name": "游戏ETF",
     "shares": 1291.7165738979309,
     "cost": 1.5484,
-    "held_days": 10,
+    "held_days": 11,
     "history": [
       {
         "date": "2026-02-09",
@@ -123,7 +123,7 @@
     "name": "煤炭ETF",
     "shares": 5319.148936170213,
     "cost": 1.128,
-    "held_days": 10,
+    "held_days": 11,
     "history": [
       {
         "date": "2026-02-09",
@@ -149,7 +149,7 @@
     "name": "黄金ETF",
     "shares": 2224.212546939561,
     "cost": 2.248,
-    "held_days": 10,
+    "held_days": 11,
     "history": [
       {
         "date": "2026-02-09",
@@ -181,7 +181,7 @@
     "name": "创业板ETF",
     "shares": 3463.8287207626518,
     "cost": 3.3201,
-    "held_days": 9,
+    "held_days": 10,
     "history": [
       {
         "date": "2026-02-09",
@@ -237,7 +237,7 @@
     "name": "半导体ETF",
     "shares": 1237.2675560790587,
     "cost": 1.6165,
-    "held_days": 9,
+    "held_days": 10,
     "history": [
       {
         "date": "2026-02-09",
@@ -269,7 +269,7 @@
     "name": "科创50ETF",
     "shares": 327.8688524590164,
     "cost": 1.525,
-    "held_days": 8,
+    "held_days": 9,
     "history": [
       {
         "date": "2026-02-09",
@@ -283,7 +283,7 @@
     "name": "恒生科技ETF",
     "shares": 1792.1160017991958,
     "cost": 1.116,
-    "held_days": 7,
+    "held_days": 8,
     "history": [
       {
         "date": "2026-02-09",
@@ -297,7 +297,7 @@
     "name": "证券ETF",
     "shares": 1099.8777214630472,
     "cost": 0.9092,
-    "held_days": 7,
+    "held_days": 8,
     "history": [
       {
         "date": "2026-02-09",
@@ -311,7 +311,7 @@
     "name": "医疗ETF",
     "shares": 464.3746683103712,
     "cost": 1.0767,
-    "held_days": 7,
+    "held_days": 8,
     "history": [
       {
         "date": "2026-02-09",
@@ -325,7 +325,7 @@
     "name": "传媒ETF",
     "shares": 1659.7510373443984,
     "cost": 1.205,
-    "held_days": 6,
+    "held_days": 7,
     "history": [
       {
         "date": "2026-02-09",
