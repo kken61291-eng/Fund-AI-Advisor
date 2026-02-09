@@ -31,14 +31,12 @@ def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily
         logger.info(f"🔍 [DEBUG] {fund_name} 基础分细节: {tech.get('quant_reasons', [])}")
 
     tactical_score = max(0, min(100, base_score + ai_adj))
-    
     action_str = "加分进攻" if ai_adj > 0 else ("减分防御" if ai_adj < 0 else "中性维持")
     logger.info(f"🧮 [算分 {fund_name}] 技术面({base_score}) + CIO修正({ai_adj:+d} {action_str}) = 最终分({tactical_score})")
     
     tech['final_score'] = tactical_score
     tech['ai_adjustment'] = ai_adj
     tech['valuation_desc'] = val_desc
-    
     cro_signal = tech.get('tech_cro_signal', 'PASS')
     
     tactical_mult = 0
@@ -50,7 +48,6 @@ def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily
     elif tactical_score <= 25: tactical_mult = -1.0; reasons.append("战术:破位")
 
     final_mult = tactical_mult
-    
     if tactical_mult > 0:
         if val_mult < 0.5: final_mult = 0; reasons.append(f"战略:高估刹车")
         elif val_mult > 1.0: final_mult *= val_mult; reasons.append(f"战略:低估加倍")
@@ -72,7 +69,6 @@ def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily
         final_mult = 0; reasons.append(f"规则:锁仓({held_days}天)")
 
     final_amt = 0; is_sell = False; sell_val = 0; label = "观望"
-
     if final_mult > 0:
         amt = int(base_amt * final_mult)
         final_amt = max(0, min(amt, int(max_daily)))
@@ -87,8 +83,6 @@ def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily
     return final_amt, label, is_sell, sell_val
 
 def render_html_report_v13(all_news, results, cio_html, advisor_html):
-    # (这部分 UI 代码很长，且没有逻辑修改，为了节省篇幅，请直接保留您现有的 render_html_report_v13 函数)
-    # ... 请保留之前的 HTML 渲染代码 ...
     news_html = ""
     seen_titles = set()
     unique_news = []
@@ -164,10 +158,10 @@ def process_single_fund(fund, config, fetcher, scanner, tracker, val_engine, ana
     try:
         logger.info(f"Analyzing {fund['name']}...")
         
-        # 获取K线
+        # [修改] 严格获取数据，如果为 None 直接返回，不进行模拟
         data = fetcher.get_fund_history(fund['code'])
         if data is None or data.empty: 
-            logger.warning(f"⚠️ No data for {fund['name']}")
+            logger.warning(f"⚠️ 无法获取 {fund['name']} 的真实数据，跳过分析。")
             return None, "", []
 
         # 计算技术指标
@@ -265,7 +259,7 @@ def main():
     tracker = PortfolioTracker()
     val_engine = ValuationEngine()
     
-    logger.info(f">>> [V15.7] Startup | DEBUG_MODE={DEBUG_MODE} | Models Ready")
+    logger.info(f">>> [V15.9] Startup | DEBUG_MODE={DEBUG_MODE} | Real Data Only")
     tracker.confirm_trades()
     try: analyst = NewsAnalyst()
     except: analyst = None
