@@ -10,7 +10,8 @@ from market_scanner import MarketScanner
 from technical_analyzer import TechnicalAnalyzer
 from valuation_engine import ValuationEngine
 from portfolio_tracker import PortfolioTracker
-from utils import send_email, logger
+# [修改] 从 utils 引入 LOG_FILENAME
+from utils import send_email, logger, LOG_FILENAME
 
 # --- 全局配置 ---
 DEBUG_MODE = True  
@@ -226,7 +227,6 @@ def process_single_fund(fund, config, fetcher, scanner, tracker, val_engine, ana
             if amt > 0: tracker.add_trade(fund['code'], fund['name'], amt, tech['price'])
             elif is_sell: tracker.add_trade(fund['code'], fund['name'], s_val, tech['price'], True)
 
-        # [修复] 统一使用 _view 后缀
         bull = ai_res.get('bull_view') or ai_res.get('bull_say', '无')
         bear = ai_res.get('bear_view') or ai_res.get('bear_say', '无')
         
@@ -298,7 +298,8 @@ def main():
         # [修改] Advisor 仍然需要 macro_str
         advisor_html = analyst.advisor_review(full_report, macro_str) if analyst else "<p>Advisor Offline</p>"
         
+        # [修改] 传入日志文件作为附件
         html = render_html_report_v13(all_news_seen, results, cio_html, advisor_html) 
-        send_email("🗡️ 玄铁量化 V15.6 铁拳决议", html) 
+        send_email("🗡️ 玄铁量化 V15.6 铁拳决议", html, attachment_path=LOG_FILENAME)
 
 if __name__ == "__main__": main()
