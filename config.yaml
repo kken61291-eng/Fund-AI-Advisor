@@ -1,81 +1,195 @@
 global:
-  base_invest_amount: 1000   # 单次基准定投金额
-  max_daily_invest: 5000     # 单日最大投入上限
+  base_invest_amount: 1000      # 单次基准定投金额
+  max_daily_invest: 5000        # 单日最大投入上限
+  max_position_per_fund: 0.15   # 单只最大持仓 (25个标的，建议降至15%以分散风险)
 
 funds:
-  # --- 👑 核心宽基 (压舱石) ---
+  # ==========================================
+  # 1. Scale & Liquidity (宽基/流动性) - 核心底仓
+  # ==========================================
+  - name: "上证50ETF"
+    code: "510050"
+    strategy_type: "core"
+    index_name: "sh000016"
+    # [关键词] 覆盖超大盘权重与金融地产
+    sector_keyword: "上证50 核心资产 蓝筹股 贵州茅台 招商银行 中国平安 金融地产 大盘股 中字头 央企市值管理"
+
   - name: "沪深300ETF"
     code: "510300"
-    index_name: "沪深300"
-    # [关键词升级] 恢复: 外资, 茅台, 核心资产
-    sector_keyword: "A股 核心资产 蓝筹 白马股 北向资金 茅台 宁德时代"
+    strategy_type: "core"
+    index_name: "sh000300"
+    # [关键词] 覆盖A股核心资产与宏观
+    sector_keyword: "沪深300 A股 核心资产 北向资金 外资流向 GDP数据 PMI指数 白马股 行业龙头 股指期货 经济复苏"
+
+  - name: "中证500ETF"
+    code: "510500"
+    strategy_type: "core"
+    index_name: "sh000905"
+    # [关键词] 覆盖中盘成长与制造业
+    sector_keyword: "中证500 中盘股 细分龙头 专精特新 制造业 估值修复 IC合约 周期成长 工业利润 转型升级"
+
+  - name: "中证1000ETF"
+    code: "512100"
+    strategy_type: "core"
+    index_name: "sh000852"
+    # [关键词] 覆盖小盘活跃资金
+    sector_keyword: "中证1000 小盘股 活跃资金 量化交易 游资 专精特新 高弹性 波动率 IM合约 民营企业 壳资源"
+
+  - name: "中证2000ETF"
+    code: "563300"
+    strategy_type: "core"
+    index_name: "sh932000"
+    # [关键词] 覆盖微盘股与情绪博弈
+    sector_keyword: "中证2000 微盘股 极致小盘 游资炒作 连板股 借壳重组 活跃资金 垃圾股爆炒 量化策略 情绪博弈"
+
+  # ==========================================
+  # 2. Growth & Tech (科技成长) - 卫星进攻
+  # ==========================================
+  - name: "创业板ETF"
+    code: "159915"
+    strategy_type: "satellite"
+    index_name: "sz399006"
+    # [关键词] 覆盖新能源与成长权重
+    sector_keyword: "创业板 宁德时代 新能源 锂电池 阳光电源 东方财富 亿纬锂能 医药生物 成长股 机构重仓"
 
   - name: "科创50ETF"
     code: "588000"
-    index_name: "科创50"
-    sector_keyword: "科创板 硬科技 专精特新 半导体"
+    strategy_type: "satellite"
+    index_name: "sh000688"
+    # [关键词] 覆盖硬科技产业链
+    sector_keyword: "科创板 硬科技 半导体 中芯国际 金山办公 寒武纪 专精特新 国产替代 芯片设计 科创做市"
 
-  - name: "创业板ETF"
-    code: "159915"
-    index_name: "创业板指"
-    sector_keyword: "创业板 新能源 宁德时代 锂电池"
-
-  # --- 🚀 科技成长 (强周期进攻) ---
   - name: "半导体ETF"
     code: "512480"
-    index_name: "半导体"
-    # [关键词升级] 恢复: 大基金, 华为, 光刻机
-    sector_keyword: "半导体 芯片 集成电路 华为 海思 大基金 光刻机 存储"
+    strategy_type: "satellite"
+    index_name: "sh000932"
+    # [关键词] 覆盖芯片全产业链与制裁
+    sector_keyword: "半导体 芯片 集成电路 华为海思 大基金 光刻机 存储芯片 算力芯片 韦尔股份 北方华创 先进封装"
 
   - name: "纳指科技ETF"
     code: "159509"
-    index_name: "纳斯达克"
-    sector_keyword: "美股 纳斯达克 科技股 英伟达 AI OpenAI"
+    strategy_type: "satellite"
+    index_name: "NDX"
+    # [关键词] 覆盖美股科技七巨头
+    sector_keyword: "纳斯达克 美股 科技股 英伟达 Nvidia 苹果 微软 特斯拉 OpenAI 人工智能 降息预期 费城半导体"
+
+  - name: "通信ETF"
+    code: "515880"
+    strategy_type: "satellite"
+    index_name: "sh000994"
+    # [关键词] 覆盖AI算力基础设施(CPO/光模块)
+    sector_keyword: "通信设备 CPO 光模块 中际旭创 新易盛 天孚通信 5G基站 算力网络 数据中心 光纤光缆 6G"
+
+  # ==========================================
+  # 3. Cyclical & Value (周期/价值) - 轮动配置
+  # ==========================================
+  - name: "证券ETF"
+    code: "512880"
+    strategy_type: "satellite"
+    index_name: "sh000987"
+    # [关键词] 覆盖牛市旗手与政策
+    sector_keyword: "证券板块 券商 牛市旗手 中信证券 东方财富 印花税 市场成交量 降费 并购重组 资本市场改革"
+
+  - name: "银行ETF"
+    code: "512800"
+    strategy_type: "dividend"
+    index_name: "sh000947"
+    # [关键词] 覆盖高股息与金融数据
+    sector_keyword: "银行板块 招商银行 工商银行 净息差 房地产贷款 高股息 破净股 存款利率 社融数据 不良率"
+
+  - name: "中证红利ETF"
+    code: "510880"
+    strategy_type: "dividend"
+    index_name: "sh000922"
+    # [关键词] 覆盖红利防御逻辑
+    sector_keyword: "中证红利 高股息 央企分红 市值管理 中特估 煤炭 交通运输 长江电力 防御策略 股息率"
+
+  - name: "新能源ETF"
+    code: "516160"
+    strategy_type: "satellite"
+    index_name: "sh000941"
+    # [关键词] 覆盖光伏风电储能
+    sector_keyword: "新能源 光伏 隆基绿能 通威股份 风电 储能电池 碳中和 产能过剩 行业出海 硅料价格"
+
+  - name: "机器人ETF"
+    code: "562500"
+    strategy_type: "satellite"
+    index_name: "sh000685"
+    # [关键词] 覆盖人形机器人与智能制造
+    sector_keyword: "人形机器人 特斯拉Optimus 减速器 汇川技术 埃斯顿 绿的谐波 传感器 智能制造 工业自动化 具身智能"
+
+  # ==========================================
+  # 4. Global View (全球视野) - 跨市场配置
+  # ==========================================
+  - name: "标普500ETF"
+    code: "513500"
+    strategy_type: "core"
+    index_name: "SPX"
+    # [关键词] 覆盖美股宏观
+    sector_keyword: "标普500 美股 SPX 巴菲特 美国经济 非农数据 美联储 软着陆 伯克希尔 核心通胀率"
+
+  - name: "日经225ETF"
+    code: "159866"
+    strategy_type: "satellite"
+    index_name: "N225"
+    # [关键词] 覆盖日本市场
+    sector_keyword: "日经225 日本股市 巴菲特加仓 日元汇率 日本央行 丰田汽车 五大商社 宽松政策 亚洲股市 货币政策"
 
   - name: "恒生科技ETF"
     code: "513130"
-    index_name: "恒生科技"
-    sector_keyword: "港股 腾讯 阿里 美团 互联网 平台经济"
+    strategy_type: "satellite"
+    index_name: "HSTECH"
+    # [关键词] 覆盖港股互联网巨头
+    sector_keyword: "恒生科技 港股 腾讯控股 阿里巴巴 美团 小米集团 南向资金 互联网巨头 平台经济 估值洼地"
 
-  # [传媒] 与 [游戏] 虽然相关，但侧重不同(Sora vs 娱乐)，均保留以增加AI应用捕捉面
-  - name: "传媒ETF"
-    code: "512980"
-    index_name: "中证传媒"
-    # [关键词升级] 恢复: Sora, AIGC
-    sector_keyword: "传媒 游戏 AI应用 短剧 电影 字节跳动 OpenAI Sora"
+  - name: "恒生红利ETF"
+    code: "159726"
+    strategy_type: "dividend"
+    index_name: "HSCDI"
+    # [关键词] 覆盖港股高分红
+    sector_keyword: "港股红利 高股息 中国移动 中国海油 内银股 南向资金 AH股溢价 避险资产 现金流 低估值"
 
   - name: "游戏ETF"
     code: "159869"
-    index_name: "游戏动漫"
-    sector_keyword: "游戏 电竞 游戏版号 虚拟现实"
+    strategy_type: "satellite"
+    index_name: "sz399006"
+    # [关键词] 覆盖AI应用落地与出海
+    sector_keyword: "游戏板块 腾讯游戏 网易游戏 AI游戏 版号发放 出海收入 恺英网络 三七互娱 吉比特 元宇宙应用"
 
-  # --- 🛡️ 周期与防守 (绝对收益) ---
-  - name: "红利ETF"
-    code: "510880"
-    index_name: "中证红利"
-    # [关键词升级] 恢复: 市值管理, 央企考核
-    sector_keyword: "高股息 央企 红利 市值管理 分红 煤炭 银行"
-
-  - name: "煤炭ETF"  # [找回] 强周期/高股息代表
-    code: "515220"
-    index_name: "中证煤炭"
-    # [关键词升级] 恢复: 电力, 寒潮
-    sector_keyword: "煤炭 能源 期货 动力煤 焦煤 寒潮 电力"
-
+  # ==========================================
+  # 5. Macro Hedge (宏观对冲) - 另类资产
+  # ==========================================
   - name: "黄金ETF"
     code: "518880"
-    index_name: "黄金"
-    # [关键词升级] 恢复: 央行购金, 通胀
-    sector_keyword: "黄金 金价 美联储 避险 央行购金 通胀 地缘"
+    strategy_type: "hedge"
+    index_name: "AU9999"
+    # [关键词] 覆盖金价影响因子
+    sector_keyword: "黄金价格 现货黄金 伦敦金 避险资产 央行购金 美联储降息 地缘政治 通胀预期 俄乌局势 货币贬值"
 
-  # --- 🦅 困境反转 (左侧博弈) ---
-  - name: "证券ETF"
-    code: "512880"
-    index_name: "全指证券公司"
-    # [关键词升级] 恢复: 降费, 并购重组
-    sector_keyword: "证券 券商 牛市旗手 印花税 降费 并购重组"
+  - name: "30年国债ETF"
+    code: "511090"
+    strategy_type: "hedge"
+    index_name: "sh000012"
+    # [关键词] 覆盖利率债逻辑
+    sector_keyword: "国债期货 30年国债 债券收益率 央行降息 降准 货币政策 避险资产 利率债 债券牛市 长期国债"
 
-  - name: "医疗ETF"
-    code: "512170"
-    index_name: "中证医疗"
-    sector_keyword: "医疗 医药 CXO 创新药 医保 葛兰"
+  - name: "有色金属ETF"
+    code: "512400"
+    strategy_type: "satellite"
+    index_name: "sh000819"
+    # [关键词] 覆盖资源周期
+    sector_keyword: "有色金属 铜价 铝 紫金矿业 锂矿 黄金 洛阳钼业 资源股 大宗商品 期货价格"
+
+  - name: "豆粕ETF"
+    code: "159985"
+    strategy_type: "hedge"
+    index_name: "DCE_M"
+    # [关键词] 覆盖农产品通胀
+    sector_keyword: "豆粕期货 大宗商品 饲料价格 生猪养殖 通胀 农产品 美豆 厄尔尼诺 粮食安全 农业"
+
+  - name: "能源化工ETF"
+    code: "159981"
+    strategy_type: "hedge"
+    index_name: "sh000066"
+    # [关键词] 覆盖原油与化工周期
+    sector_keyword: "能源化工 原油期货 甲醇 PTA 乙二醇 煤化工 原油价格 地缘政治 供给冲击 通胀对冲 OPEC"
