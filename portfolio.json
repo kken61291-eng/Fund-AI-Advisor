@@ -1,7 +1,86 @@
 {
-  "cash": 50000.0,
-  "total_value": 50000.0,
-  "holdings": {},
-  "trade_history": [],
-  "start_date": "2026-02-10"
+  "563300": {
+    "name": "中证2000ETF",
+    "shares": 1322.7513227513227,
+    "cost": 1.512,
+    "held_days": 1,
+    "history": [
+      {
+        "date": "2026-02-09",
+        "price": 1.512,
+        "s": "B",
+        "amt": 2000
+      }
+    ]
+  },
+  "515880": {
+    "name": "通信ETF",
+    "shares": 930.232558139535,
+    "cost": 1.075,
+    "held_days": 1,
+    "history": [
+      {
+        "date": "2026-02-09",
+        "price": 1.075,
+        "s": "B",
+        "amt": 1000
+      }
+    ]
+  },
+  "510880": {
+    "name": "中证红利ETF",
+    "shares": 0,
+    "cost": 0.0,
+    "held_days": 0,
+    "history": [
+      {
+        "date": "2026-02-09",
+        "price": 3.144,
+        "s": "S",
+        "amt": 0
+      }
+    ]
+  },
+  "159866": {
+    "name": "日经225ETF",
+    "shares": 1371.7421124828534,
+    "cost": 1.458,
+    "held_days": 1,
+    "history": [
+      {
+        "date": "2026-02-09",
+        "price": 1.458,
+        "s": "B",
+        "amt": 2000
+      }
+    ]
+  },
+  "513500": {
+    "name": "标普500ETF",
+    "shares": 209.819555182543,
+    "cost": 2.383,
+    "held_days": 1,
+    "history": [
+      {
+        "date": "2026-02-09",
+        "price": 2.383,
+        "s": "B",
+        "amt": 500
+      }
+    ]
+  },
+  "512400": {
+    "name": "有色金属ETF",
+    "shares": 0,
+    "cost": 0.0,
+    "held_days": 0,
+    "history": [
+      {
+        "date": "2026-02-09",
+        "price": 2.199,
+        "s": "S",
+        "amt": 0
+      }
+    ]
+  }
 }
