@@ -12,6 +12,7 @@ from valuation_engine import ValuationEngine
 from portfolio_tracker import PortfolioTracker
 from utils import send_email, logger
 
+# 线程锁，防止多线程写入 tracker 时冲突
 tracker_lock = threading.Lock()
 
 def load_config():
@@ -28,7 +29,6 @@ def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily
     base_score = tech.get('quant_score', 50)
     
     # 2. 最终分 (Final Score) = 基础分 + CIO主观修正
-    # CIO 的修正代表了对新闻面和宏观面的权重
     tactical_score = max(0, min(100, base_score + ai_adj))
     
     # [V14.26] 打印决策算式，确保透明
@@ -39,6 +39,7 @@ def calculate_position_v13(tech, ai_adj, val_mult, val_desc, base_amt, max_daily
     tech['ai_adjustment'] = ai_adj
     tech['valuation_desc'] = val_desc
     
+    # 获取技术风控信号 (由 TechnicalAnalyzer 提供)
     cro_signal = tech.get('tech_cro_signal', 'PASS')
     
     tactical_mult = 0
@@ -125,7 +126,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             risk = tech.get('risk_factors', {})
             final_score = tech.get('final_score', 0)
             ai_adj = tech.get('ai_adjustment', 0)
-            base_score = final_score - ai_adj # 反推基础分用于展示
+            base_score = final_score - ai_adj 
             
             cro_signal = tech.get('tech_cro_signal', 'PASS')
             cro_comment = tech.get('tech_cro_comment', '无')
@@ -164,7 +165,6 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             chairman = ai_data.get('comment', '无')
 
             if bull_say and bear_say:
-                # [V14.26] UI增强：在主席区域明确展示加减分
                 adj_color = "#ff5252" if ai_adj > 0 else ("#69f0ae" if ai_adj < 0 else "#ccc")
                 committee_html = f"""
                 <div style="margin-top:12px;border-top:1px solid #444;padding-top:10px;">
@@ -219,7 +219,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
         except Exception as e:
             logger.error(f"渲染错误 {r.get('name')}: {e}")
 
-    # [UI 核心] V14.21 样式：纯净黑底，白字
+    # [UI 核心] V14.21 样式
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
         body {{ background: #0a0a0a; color: #f0e6d2; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; max-width: 660px; margin: 0 auto; padding: 20px; }}
         .main-container {{ border: 2px solid #333; border-top: 5px solid #ffb74d; border-radius: 4px; padding: 20px; background: linear-gradient(180deg, #1b1b1b 0%, #000000 100%); }}
@@ -239,11 +239,9 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             border-radius: 2px; 
             box-shadow: 0 4px 10px rgba(0,0,0,0.3);
         }}
-        /* 强制CIO部分字体为纯白 */
         .cio-section p, .cio-section div, .cio-section h3 {{ color: #ffffff !important; line-height: 1.6; }}
         .cio-section h3 {{ color: #ffffff !important; border-bottom: 1px dashed #5c1818; padding-bottom: 5px; margin-top: 15px; margin-bottom: 8px; }}
 
-        /* 玄铁先生 风格 */
         .advisor-section {{ 
             background: #0f0f0f; 
             border: 1px solid #d4af37; 
@@ -254,8 +252,6 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             box-shadow: 0 0 10px rgba(212, 175, 55, 0.2); 
             position: relative;
         }}
-        
-        /* 强制玄铁先生部分字体为纯白，保留 Georgia 字体 */
         .advisor-section * {{ color: #ffffff !important; line-height: 1.6; font-family: 'Georgia', serif; }}
         .advisor-section h4 {{ color: #ffd700 !important; margin-top: 15px; margin-bottom: 8px; border-bottom: 1px dashed #333; padding-bottom: 4px; }}
 
@@ -265,7 +261,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
         <div class="main-container">
             <div class="header">
                 <h1 class="title">XUANTIE QUANT</h1>
-                <div class="subtitle">HEAVY SWORD, NO EDGE | V14.26 DIALECTIC FEDERAL</div>
+                <div class="subtitle">HEAVY SWORD, NO EDGE | V15.6 IRON FIST</div>
             </div>
             
             <div class="radar-panel">
@@ -284,7 +280,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             </div>
 
             {rows}
-            <div class="footer">EST. 2026 | POWERED BY AKSHARE & EM</div>
+            <div class="footer">EST. 2026 | POWERED BY AKSHARE & EM | V15.6</div>
         </div>
     </body></html>"""
 
@@ -294,7 +290,8 @@ def process_single_fund(fund, config, fetcher, scanner, tracker, val_engine, ana
     used_news = []
     
     try:
-        time.sleep(random.uniform(1.0, 3.0)) 
+        # [V15.6 并发优化] 移除随机等待，V3.2 API 能够处理高并发
+        # time.sleep(random.uniform(1.0, 3.0)) 
         logger.info(f"Analyzing {fund['name']}...")
         
         data = fetcher.get_fund_history(fund['code'])
@@ -316,12 +313,27 @@ def process_single_fund(fund, config, fetcher, scanner, tracker, val_engine, ana
         ai_adj = 0; ai_res = {}
         keyword = fund.get('sector_keyword', fund['name']) 
         
+        # [V15.6 核心适配逻辑]
         if analyst and (pos['shares']>0 or tech['quant_score']>=60 or tech['quant_score']<=35):
             sector_news_list = analyst.fetch_news_titles(keyword)
-            # [V14.26] 日志增强：新闻快照
             logger.info(f"📰 [News Snapshot {fund['name']}] Hit: {len(sector_news_list)}")
             
-            ai_res = analyst.analyze_fund_v4(fund['name'], tech, macro_str, sector_news_list)
+            # 1. 构建 V15.6 必需的 Risk 数据包
+            # 将本地的技术风控信号映射为 AI 可理解的熔断等级
+            cro_signal = tech.get('tech_cro_signal', 'PASS')
+            fuse_level = 0
+            if cro_signal == 'VETO': fuse_level = 3  # 严重警告
+            elif cro_signal == 'WARN': fuse_level = 1 # 一般警告
+            
+            risk_payload = {
+                "fuse_level": fuse_level,
+                "risk_msg": tech.get('tech_cro_comment', '常规监控')
+            }
+            
+            # 2. 调用 V5 接口 (原 v4)
+            # 注意：这里传入了新的 risk_payload
+            ai_res = analyst.analyze_fund_v5(fund['name'], tech, macro_str, sector_news_list, risk_payload)
+            
             ai_adj = ai_res.get('adjustment', 0)
             
             for n_str in sector_news_list:
@@ -369,7 +381,7 @@ def main():
     tracker = PortfolioTracker()
     val_engine = ValuationEngine()
     
-    logger.info(">>> [V14.26] 启动玄铁量化 (Dialectic Federal)...")
+    logger.info(">>> [V15.6] 启动玄铁量化 (Iron Fist / Dual Brain)...")
     tracker.confirm_trades()
     try: analyst = NewsAnalyst()
     except: analyst = None
@@ -383,7 +395,10 @@ def main():
 
     results = []; cio_lines = [f"【宏观环境】: {macro_str}\n"]
     
-    with ThreadPoolExecutor(max_workers=1) as executor:
+    # [V15.6 并发升级] 
+    # V3.2 模型响应极快，建议开启多线程以缩短总运行时间。
+    # 建议设置为 cpu_count + 2 或直接给 4-8
+    with ThreadPoolExecutor(max_workers=5) as executor:
         future_to_fund = {executor.submit(
             process_single_fund, 
             fund, config, fetcher, scanner, tracker, val_engine, analyst, macro_str, 
@@ -403,10 +418,11 @@ def main():
         results.sort(key=lambda x: -x['tech'].get('final_score', 0))
         full_report = "\n".join(cio_lines)
         
+        # CIO 和 顾问复盘逻辑保持不变，参数兼容
         cio_html = analyst.review_report(full_report) if analyst else "<p>CIO 缺席</p>"
         advisor_html = analyst.advisor_review(full_report, macro_str) if analyst else "<p>玄铁先生闭关中</p>"
         
         html = render_html_report_v13(all_news_seen, results, cio_html, advisor_html) 
-        send_email("🗡️ 玄铁量化 V14.26 最终决议", html)
+        send_email("🗡️ 玄铁量化 V15.6 铁拳决议", html) 
 
 if __name__ == "__main__": main()
