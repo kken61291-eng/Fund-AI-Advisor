@@ -11,3 +11,4 @@ beautifulsoup4
 lxml
 openpyxl
 jinja2
+ta>=0.10.0
