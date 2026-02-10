@@ -1,7 +1,22 @@
+这是为您修改后的完整全量代码。
+
+**修改点说明：**
+
+1. **新增 `import base64**`：用于处理本地图片编码。
+2. **修改 `render_html_report_v13` 函数**：添加了检测本地图片文件的逻辑。
+* 脚本会自动优先寻找同目录下的 `Gemini_Generated_Image_d7oeird7oeird7oe.jpg` 或 `logo.png`。
+* 它会将图片转换为 **Base64 编码**直接嵌入邮件 HTML 中。这意味着您不需要将图片上传到 GitHub 或图床，只要图片在本地文件夹中，邮件里的 Logo 就能正常显示，且支持透明背景（在深色模式下效果更好）。
+
+
+
+请将您上传的图片保存在脚本同一目录下，建议重命名为 `logo.png`，或者保持原名 `Gemini_Generated_Image_d7oeird7oeird7oe.jpg` 均可生效。
+
+```python
 import yaml
 import os
 import threading
 import json
+import base64  # 新增: 用于将本地图片转换为Base64编码嵌入HTML
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from data_fetcher import DataFetcher
 from news_analyst import NewsAnalyst
@@ -11,7 +26,7 @@ from portfolio_tracker import PortfolioTracker
 from utils import send_email, logger, LOG_FILENAME
 
 # --- 全局配置 ---
-DEBUG_MODE = True  
+DEBUG_MODE = True
 tracker_lock = threading.Lock()
 
 def load_config():
@@ -214,7 +229,28 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
         except Exception as e:
             logger.error(f"Render Error {r.get('name')}: {e}")
     
+    # --- LOGO 处理逻辑 (优先使用本地文件以支持透明背景) ---
+    logo_path = "logo.png"  # 优先: 标准文件名
+    alt_logo_path = "Gemini_Generated_Image_d7oeird7oeird7oe.jpg" # 备选: 用户提供的原始文件名
+    
+    # 如果用户上传的文件存在，优先使用它
+    if os.path.exists(alt_logo_path) and not os.path.exists(logo_path):
+        logo_path = alt_logo_path
+
+    # 默认使用 GitHub 链接作为兜底
     logo_url = "https://raw.githubusercontent.com/kken61291-eng/Fund-AI-Advisor/main/logo.png"
+
+    if os.path.exists(logo_path):
+        try:
+            with open(logo_path, "rb") as img_file:
+                # 读取本地文件并转换为Base64编码，直接嵌入HTML，这样不需要图床也能显示
+                b64_data = base64.b64encode(img_file.read()).decode('utf-8')
+                # 即使后缀是jpg，为了透明通道通常建议作为png处理，但这里根据后缀稍微区分一下
+                mime_type = "image/jpeg" if logo_path.lower().endswith(".jpg") or logo_path.lower().endswith(".jpeg") else "image/png"
+                logo_url = f"data:{mime_type};base64,{b64_data}"
+                logger.info(f"✅ 已加载本地 Logo: {logo_path}")
+        except Exception as e:
+            logger.error(f"❌ 加载本地 Logo 失败: {e}")
     
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
     body {{ background: {COLOR_BG_MAIN}; color: {COLOR_TEXT_MAIN}; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; max-width: 660px; margin: 0 auto; padding: 20px; }}
@@ -386,3 +422,5 @@ def main():
         send_email("🐦 鹊知风 V15.20 铁拳决议 (Dark Finance UI)", html, attachment_path=LOG_FILENAME)
 
 if __name__ == "__main__": main()
+
+```
