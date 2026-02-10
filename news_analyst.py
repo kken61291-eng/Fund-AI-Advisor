@@ -16,13 +16,12 @@ class NewsAnalyst:
         # 战术执行 (快思考): V3.2 - 负责 CGO/CRO/CIO 实时信号
         self.model_tactical = "Pro/deepseek-ai/DeepSeek-V3.2"      
         # 战略推理 (慢思考): R1 - 负责 宏观复盘/逻辑审计
-        self.model_strategic = "Pro/deepseek-ai/DeepSeek-R1"  
+        self.model_strategic = "Pro/deepseek-ai/DeepSeek-R1"   
 
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
-        # [V15.16 改动] 移除 self.knowledge_base，不再加载任何预设规则
 
     def _clean_time(self, t_str):
         """统一时间格式为 MM-DD HH:MM"""
@@ -180,36 +179,53 @@ class NewsAnalyst:
     @retry(retries=1, delay=2)
     def analyze_fund_v5(self, fund_name, tech, macro, news, risk, strategy_type="core"):
         """
-        [战术层] 联邦投委会 (V3.2) - 纯数据驱动 (无RAG干扰)
+        [战术层] 联邦投委会 (V3.2) - 引入 IC 角色纪律规范 v2.0
         """
         fuse_level = risk['fuse_level']
         fuse_msg = risk['risk_msg']
         trend_score = tech.get('quant_score', 50)
         
-        # [V15.16] 提示词净化：移除所有关于“经验库”的描述，强制 AI 只看数据
+        # [V15.20 改动] 植入 CGO/CRO/CIO 角色纪律与铁律
         prompt = f"""
-        【系统架构】鹊知风投委会 | 纯数据驱动模式 (Pure Data Driven)
-        
+        【系统架构】鹊知风投委会 (IC) | 角色纪律规范 v2.0
+        当前物理位置: 日本 (Japan) | 视角: 国际投资者
+
         【标的信息】
         标的: {fund_name} (属性: {strategy_type})
         趋势强度: {trend_score}/100 | 熔断状态: Level{fuse_level} | 硬约束: {fuse_msg}
         技术指标: RSI={tech.get('rsi',50)} | MACD={tech.get('macd',{}).get('trend','-')}
         
-        【实时舆情 (EastMoney + CLS双源)】
+        【实时舆情 (EastMoney + CLS)】
         {str(news)[:25000]}
 
+        【角色纪律 (Strict IC Protocols)】
+        
+        1. 🐻 CRO (防守底线):
+           - 核心: 保护本金，关注 Tail Risk (尾部风险) 和 Correlation (相关性)。
+           - 铁律 (No Generic Fear): 禁止将“地缘政治”作为万能利空。地缘紧张对股票是利空，但对避险资产(黄金/能源)是**核心利好**。
+           - 铁律 (Hedge over Liquidity): 当宏观风险极高时，拥有**"指标豁免权"**。即使流动性差，也必须建议配置对冲(Hedge)仓位，而非机械拒绝。
+
+        2. 🦊 CGO (进攻锋线):
+           - 核心: 寻找 Catalyst (催化剂) 和 Momentum (动量)。
+           - 铁律 (No Forced Correlation): 禁止"强行关联"。必须证明新闻对该标的有 **Direct Causality** (直接营收/成本影响)。禁止 AI-washing (生硬蹭AI热点)。
+           - 铁律 (Volume Confirmation): 拒绝缩量上涨。
+
+        3. ⚖️ CIO (决策中枢):
+           - 核心: 计算 Risk-Reward Ratio (盈亏比) 与 Position Sizing (仓位)。
+           - 铁律: 必须给出具体的仓位调整建议 (adjustment)。
+           - 视角: 必须包含 **JPY (日元)** 汇率维度及日本地缘视角的考量。
+
         【任务】
-        作为客观的量化交易员，请仅基于上述“技术指标”和“实时新闻”做出判断。
-        禁止引用任何预设的、外部的或未知的经验规则。
-        若新闻无相关内容，请完全依赖技术指标。
+        仅基于提供的数据，模拟上述三位角色的辩论。
+        若熔断 Level >= 2，直接执行风控清仓逻辑。
 
         【输出格式】
         {{
-            "bull_view": "...",
-            "bear_view": "...",
-            "chairman_conclusion": "...",
+            "bull_view": "CGO观点 (聚焦赔率/催化剂/直接因果)",
+            "bear_view": "CRO观点 (聚焦敞口/对冲/本金安全/非通用恐慌)",
+            "chairman_conclusion": "CIO最终裁决 (包含日本视角/盈亏比计算)",
             "decision": "EXECUTE|REJECT|HOLD",
-            "adjustment": 0
+            "adjustment": -100 ~ 100 (建议仓位调整比例)
         }}
         """
         
@@ -232,10 +248,11 @@ class NewsAnalyst:
             try: result['adjustment'] = int(result.get('adjustment', 0))
             except: result['adjustment'] = 0
 
+            # 强制执行熔断逻辑
             if fuse_level >= 2:
                 result['decision'] = 'REJECT'
                 result['adjustment'] = -30
-                result['chairman_conclusion'] = f'[熔断] {fuse_msg}'
+                result['chairman_conclusion'] = f'[系统熔断] {fuse_msg} - 强制执行风控纪律。'
 
             return result
         except Exception as e:
@@ -248,55 +265,65 @@ class NewsAnalyst:
     @retry(retries=2, delay=5)
     def review_report(self, report_text, macro_str):
         """
-        [战略层] CIO 复盘 (R1) - 纯逻辑归纳 (无RAG)
+        [战略层] CIO 复盘 (R1) - 策略一致性与宏观定调
         """
         current_date = datetime.now().strftime("%Y年%m月%d日")
         
-        # [V15.16] 提示词净化：移除RAG注入，改为纯粹的宏观与微观对照分析
+        # [V15.20 改动] 引入 CIO 宏观定调纪律与策略一致性检查
         prompt = f"""
-        【系统角色】鹊知风CIO | 首席投资官 | 日期: {current_date}
-        
+        【系统角色】鹊知风 CIO (Chief Investment Officer) | 战略复盘
+        日期: {current_date} | 物理位置: 日本 (Japan)
+
         【输入数据】
-        1. 宏观环境 (基于新闻流): {macro_str[:2500]}
-        2. 交易明细 (投委会决策): {report_text[:3000]}
-        
-        【任务】
-        请基于上述信息，撰写一份《每日投资复盘备忘录》。
-        1. 宏观定调：根据新闻判断今日市场情绪（恐慌/贪婪/分歧）。
-        2. 策略一致性检查：投委会的买卖操作是否符合今日的宏观基调？
-        3. 风险提示：指出数据中隐含的风险点。
-        
-        注意：不要臆造不存在的规则，只针对已发生的数据进行点评。
-        
-        【输出】HTML格式CIO备忘录。
+        1. 宏观环境 (News Flow): {macro_str[:2500]}
+        2. 交易决策 (IC Decisions): {report_text[:3000]}
+
+        【战略任务】
+        请撰写《每日投资复盘备忘录》，重点执行以下纪律：
+
+        1. 宏观定调 (Macro Regime):
+           - 定义今日市场情绪：恐慌(Panic) / 贪婪(Greed) / 分歧(Divergence)。
+           - 必须识别主要矛盾（如：地缘政治 vs 政策宽松）。
+
+        2. 策略一致性检查 (Strategy Consistency Check):
+           - 审查投委会的操作是否精神分裂？
+           - 例如：如果宏观定调为"极度恐慌"，但决策却在买入高风险小盘股，请严厉指出。
+           - 检查是否忽视了日本视角（如日元汇率风险）。
+
+        3. 风险提示 (Risk Radar):
+           - 指出数据中隐含的 Tail Risk (尾部风险)。
+           - 重点关注流动性陷阱和相关性崩塌。
+
+        【输出】HTML格式 CIO 备忘录。
         """
         return self._call_r1(prompt)
 
     @retry(retries=2, delay=5)
     def advisor_review(self, report_text, macro_str):
         """
-        [审计层] Red Team 顾问 (R1) - 逻辑自洽性审计
+        [审计层] Red Team 顾问 (R1) - 逻辑黑客与压力测试
         """
         current_date = datetime.now().strftime("%Y年%m月%d日")
         
+        # [V15.20 改动] 引入 Red Team 逻辑黑客审计
         prompt = f"""
-        【系统角色】鹊知风Red Team | 独立风控顾问 | 日期: {current_date}
-        
+        【系统角色】鹊知风 Red Team | 独立逻辑黑客 (Logic Hacker)
+        日期: {current_date}
+
         【输入数据】
         宏观: {macro_str[:2500]} | 交易: {report_text[:3000]}
-        
-        【任务】
-        寻找“数据”与“决策”之间的逻辑漏洞。
-        例如：如果宏观显示重大利空，但投委会却满仓买入，这就是逻辑漏洞。
-        
-        【五问压力测试】
-        Q1: 决策是否过于激进?
-        Q2: 是否忽视了宏观风险?
-        Q3: 仓位控制是否合理?
-        Q4: 交易方向是否与趋势背离?
-        Q5: 是否存在情绪化交易?
-        
-        【输出】HTML格式审计报告。
+
+        【审计任务】
+        作为"找茬专家"，请无情地攻击 CIO 的决策逻辑。寻找 Blind Spot (盲区) 和 Overfitting (过拟合)。
+
+        【五维压力测试 (Stress Test)】
+        Q1: 决策激进性审计 (是否在接飞刀?)
+        Q2: 宏观逻辑漏洞 (是否用同样的宏观理由解释完全相反的交易?)
+        Q3: 仓位合理性 (是否处于"裸奔"状态，缺乏 Hedging?)
+        Q4: 趋势背离风险 (是否在对抗不可逆转的趋势?)
+        Q5: 情绪化交易检测 (CGO 是否存在强行关联/AI-washing?)
+
+        【输出】HTML格式风控审计报告，必须包含"关键漏洞"和"风险评级"。
         """
         return self._call_r1(prompt)
 
