@@ -42,21 +42,25 @@ class NewsAnalyst:
         """
         try:
             time.sleep(1)
-            # 使用电报接口
+            # 使用电报接口，获取含摘要的实时新闻
             df = ak.stock_telegraph_em()
             news = []
             
-            # [修改] 既然要按长度限制，这里源头就不做硬性条数限制了
-            # 抓取 100 条作为候选池，后续由 get_market_context 按长度筛选
+            # 抓取 100 条作为候选池
             for i in range(min(100, len(df))):
                 title = str(df.iloc[i].get('title') or '')
+                content = str(df.iloc[i].get('content') or '')
                 t = str(df.iloc[i].get('public_time') or '')
                 if len(t) > 10: t = t[5:16] 
                 
                 # 宽松过滤
                 if self._is_valid_news(title):
-                    # 纯净格式 [时间] 标题
                     item_str = f"[{t}] {title}"
+                    # [关键修复] 把内容加回来！
+                    # 使用特殊前缀 (摘要:)，方便 main.py 识别并过滤
+                    if len(content) > 10 and content != title:
+                        # 限制摘要长度，保留核心信息给 AI
+                        item_str += f"\n   (摘要: {content[:300]})"
                     news.append(item_str)
             return news
         except Exception as e:
@@ -65,27 +69,23 @@ class NewsAnalyst:
 
     def _is_valid_news(self, title):
         """
-        [宽松过滤器]
-        保留绝大多数新闻，只过滤明显的空数据或极短数据
+        [宽松过滤器] 保留绝大多数新闻
         """
         if not title: 
             return False
-        
-        # 只过滤极短的无效标题
         if len(title) < 2: 
             return False
-            
         return True
 
     def get_market_context(self, max_length=35000): 
         """
-        [核心逻辑升级] 按 Token/长度 限制，而非条数限制
+        [核心逻辑] 按 Token/长度 限制
         """
         news_candidates = []
         today_str = get_beijing_time().strftime("%Y-%m-%d")
         file_path = f"data_news/news_{today_str}.jsonl"
         
-        # 1. 优先读取实时电报 (最新鲜)
+        # 1. 优先读取实时电报
         live_news = self._fetch_live_patch()
         if live_news:
             news_candidates.extend(live_news)
@@ -103,7 +103,13 @@ class NewsAnalyst:
                             t_str = str(item.get('time', ''))
                             if len(t_str) > 10: t_str = t_str[5:16]
                             
+                            content = str(item.get('content') or item.get('digest') or "")
+                            
                             news_entry = f"[{t_str}] {title}"
+                            # [关键修复] 本地新闻也把内容加回来
+                            if len(content) > 10:
+                                news_entry += f"\n   (摘要: {content[:300]})"
+                                
                             news_candidates.append(news_entry)
                         except: pass
             except Exception as e:
@@ -112,32 +118,26 @@ class NewsAnalyst:
         # 3. 去重
         unique_news = []
         seen = set()
-        # 这里的顺序可能是乱的，先全部收集
         for n in news_candidates:
-            # 简单去重
-            if n not in seen:
-                seen.add(n)
+            # 只用标题部分去重 (第一行)
+            title_part = n.split('\n')[0]
+            if title_part not in seen:
+                seen.add(title_part)
                 unique_news.append(n)
         
-        # 4. [关键] 按时间排序 (倒序：最新的在最前面)
-        # 假设格式是 [MM-DD HH:MM] ... 我们主要依赖列表本身的顺序（live在前，local在后通常也是新的在前）
-        # 这里为了保险，不做复杂的时间解析排序，默认 live_news 已经是倒序的
-        
-        # 5. [关键] 按长度截断 (Token Window Limit)
+        # 4. 按长度截断
         final_list = []
         current_len = 0
         
         for news_item in unique_news:
             item_len = len(news_item)
-            # 如果加上这条新闻还没超标，就加进去
             if current_len + item_len < max_length:
                 final_list.append(news_item)
-                current_len += item_len + 1 # +1 是换行符
+                current_len += item_len + 1 
             else:
-                # 满了就停止，不再往里塞旧新闻了
                 break
         
-        # 使用单换行符连接，方便 main.py 解析
+        # 使用换行符连接
         final_text = "\n".join(final_list)
         
         return final_text if final_text else "今日暂无重大新闻。"
@@ -184,7 +184,7 @@ class NewsAnalyst:
         【💀 鹊知风实战经验库】
         {expert_rules}
         
-        【舆情扫描 (基于上下文长度限制)】
+        【舆情扫描 (含详细摘要)】
         {str(news)[:25000]}
 
         【任务】
