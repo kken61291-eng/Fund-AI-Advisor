@@ -2,6 +2,7 @@ requests
 pandas
 numpy
 pyyaml
+# [关键] 不要写 ==1.18.22，直接写库名，让它能装到最新的
 akshare
 scikit-learn
 schedule
@@ -13,6 +14,6 @@ openpyxl
 jinja2
 ta>=0.10.0
 pytz
-# [新增] 模拟浏览器必须的库
+# [关键] 财联社浏览器抓取必须的库
 selenium
 webdriver-manager
