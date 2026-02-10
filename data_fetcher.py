@@ -155,7 +155,7 @@ class DataFetcher:
             # 这样可以最大程度保证后续的基金也能用到东财数据
             if source == "东财":
                 logger.info("⏳ [东财] 触发频率保护机制，等待 50 秒...")
-                time.sleep(50)
+                time.sleep(30)
                 
             return True
         else:
