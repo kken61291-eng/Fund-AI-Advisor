@@ -24,29 +24,27 @@ def load_config():
 
 def calculate_position_v13(tech, ai_adj, ai_decision, val_mult, val_desc, base_amt, max_daily, pos, strategy_type, fund_name):
     """
-    V13 核心算分逻辑 (含 CIO 一票否决权)
+    V13 核心算分逻辑 (含 CIO 一票否决权 & 类型安全修复)
     """
     base_score = tech.get('quant_score', 50)
     
-    if DEBUG_MODE:
-        logger.info(f"🔍 [DEBUG] {fund_name} 基础分细节: {tech.get('quant_reasons', [])}")
+    try:
+        ai_adj_int = int(ai_adj)
+    except:
+        logger.warning(f"⚠️ {fund_name} AI调整值类型错误 ({ai_adj}), 重置为0")
+        ai_adj_int = 0
 
-    # 1. 初始计算：基础分 + AI微调
-    tactical_score = max(0, min(100, base_score + ai_adj))
-    action_str = "加分进攻" if ai_adj > 0 else ("减分防御" if ai_adj < 0 else "中性维持")
-    logger.info(f"🧮 [算分 {fund_name}] 技术面({base_score}) + CIO修正({ai_adj:+d} {action_str}) = 初步分({tactical_score})")
+    tactical_score = max(0, min(100, base_score + ai_adj_int))
+    action_str = "加分进攻" if ai_adj_int > 0 else ("减分防御" if ai_adj_int < 0 else "中性维持")
+    logger.info(f"🧮 [算分 {fund_name}] 技术面({base_score}) + CIO修正({ai_adj_int:+d} {action_str}) = 初步分({tactical_score})")
     
-    # 2. [核心逻辑] CIO 一票否决权 (Override)
-    # 解决"口嫌体正直"问题：如果 AI 说 HOLD/REJECT，强制覆盖量化分数
     override_reason = ""
     original_score = tactical_score
     
     if ai_decision == "REJECT":
-        # 否决：直接归零，强制空仓或卖出信号
         tactical_score = 0 
         override_reason = "⛔ CIO指令:REJECT (强制否决)"
     elif ai_decision == "HOLD":
-        # 观望：如果分数在买入区(>=60)，强制压回观望区(59)
         if tactical_score >= 60:
             tactical_score = 59
             override_reason = "⏸️ CIO指令:HOLD (强制观望)"
@@ -54,22 +52,19 @@ def calculate_position_v13(tech, ai_adj, ai_decision, val_mult, val_desc, base_a
     if override_reason:
         logger.warning(f"⚠️ [CIO介入 {fund_name}] 原分{original_score} -> {override_reason} -> 修正后: {tactical_score}")
 
-    # 3. 记录最终状态
     tech['final_score'] = tactical_score
-    tech['ai_adjustment'] = ai_adj
+    tech['ai_adjustment'] = ai_adj_int
     tech['valuation_desc'] = val_desc
     cro_signal = tech.get('tech_cro_signal', 'PASS')
     
     tactical_mult = 0
     reasons = []
 
-    # 4. 根据修正后的分数定档
     if tactical_score >= 85: tactical_mult = 2.0; reasons.append("战术:极强")
     elif tactical_score >= 70: tactical_mult = 1.0; reasons.append("战术:走强")
     elif tactical_score >= 60: tactical_mult = 0.5; reasons.append("战术:企稳")
     elif tactical_score <= 25: tactical_mult = -1.0; reasons.append("战术:破位")
 
-    # 5. 结合估值系数
     final_mult = tactical_mult
     if tactical_mult > 0:
         if val_mult < 0.5: final_mult = 0; reasons.append(f"战略:高估刹车")
@@ -81,19 +76,15 @@ def calculate_position_v13(tech, ai_adj, ai_decision, val_mult, val_desc, base_a
         if val_mult >= 1.5 and strategy_type in ['core', 'dividend']:
             final_mult = 0.5; reasons.append(f"战略:左侧定投")
 
-    # 6. 传统技术风控 (CRO)
     if cro_signal == "VETO":
         if final_mult > 0:
             final_mult = 0
             reasons.append(f"🛡️风控:否决买入")
-            logger.info(f"🚫 [风控拦截 {fund_name}] 触发: {tech.get('tech_cro_comment')}")
     
-    # 7. 锁仓规则
     held_days = pos.get('held_days', 999)
     if final_mult < 0 and pos['shares'] > 0 and held_days < 7:
         final_mult = 0; reasons.append(f"规则:锁仓({held_days}天)")
 
-    # 8. 计算最终金额
     final_amt = 0; is_sell = False; sell_val = 0; label = "观望"
     if final_mult > 0:
         amt = int(base_amt * final_mult)
@@ -110,20 +101,23 @@ def calculate_position_v13(tech, ai_adj, ai_decision, val_mult, val_desc, base_a
 
 def render_html_report_v13(all_news, results, cio_html, advisor_html):
     """
-    生成完整的 HTML 邮件报告 (精准修复字体颜色，保持复古风格)
+    生成完整的 HTML 邮件报告 (视觉简洁版：只显示标题，但显示更多条数)
     """
     news_html = ""
+    # [关键修改] 
+    # 1. 列表切片改为 [:50]，显示更多新闻
+    # 2. 移除摘要显示的逻辑，只显示 title_line，保持界面清爽
     if isinstance(all_news, list):
-        for i, news in enumerate(all_news[:15]):
-            title = news.get('title', str(news))
-            time_str = news.get('time', '')
-            news_html += f"""<div style="font-size:11px;color:#ccc;margin-bottom:5px;border-bottom:1px dashed #333;padding-bottom:3px;"><span style="color:#ffb74d;margin-right:4px;">●</span>{title}<span style="float:right;color:#666;font-size:10px;">{time_str}</span></div>"""
+        for i, news in enumerate(all_news[:50]): 
+            # 无论新闻里有没有摘要，我们只取第一行（标题行）显示
+            raw_text = str(news).split('\n')[0] 
+            news_html += f"""<div style="font-size:11px;color:#ccc;margin-bottom:5px;border-bottom:1px dashed #333;padding-bottom:3px;"><span style="color:#ffb74d;margin-right:4px;">●</span>{raw_text}</div>"""
     
     def render_dots(hist):
         h = ""
         for x in hist:
             c = "#d32f2f" if x['s']=='B' else ("#388e3c" if x['s'] in ['S','C'] else "#555")
-            h += f'<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:{c};margin-right:3px;box-shadow:0 0 2px rgba(0,0,0,0.5);" title="{x["date"]}"></span>'
+            h += f'<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:{c};margin-right:3px;" title="{x["date"]}"></span>'
         return h
 
     rows = ""
@@ -132,7 +126,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             tech = r.get('tech', {})
             risk = tech.get('risk_factors', {})
             final_score = tech.get('final_score', 0)
-            ai_adj = tech.get('ai_adjustment', 0)
+            ai_adj = int(tech.get('ai_adjustment', 0))
             base_score = final_score - ai_adj 
             cro_signal = tech.get('tech_cro_signal', 'PASS')
             cro_comment = tech.get('tech_cro_comment', '无')
@@ -290,10 +284,7 @@ def main():
         for line in market_context.split('\n')[:20]: 
             try:
                 parts = line.split('] ', 1)
-                if len(parts) == 2:
-                    all_news_seen.append({"time": parts[0][1:], "title": parts[1]})
-                else:
-                    all_news_seen.append({"title": line, "time": ""})
+                all_news_seen.append(line)
             except Exception:
                 pass
 
