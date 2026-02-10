@@ -25,9 +25,9 @@ jobs:
     - name: Install dependencies
       run: |
         pip install --upgrade pip
+        # [关键修改] 只安装 requirements.txt 中指定的稳定版 (1.18.22)
+        # 去掉了之前的 --upgrade akshare，防止安装到不兼容的最新版
         pip install -r requirements.txt
-        # [强制升级] 确保 akshare 是最新版，防止接口报错
-        pip install --upgrade akshare
 
     # ----------------------------------------------------------------
     # 步骤 1: 抓取 7x24 全球财经电报 (News)
@@ -55,8 +55,7 @@ jobs:
         # 添加新闻目录
         git add data_news/
         
-        # [关键修正] 必须是 data_cache/，与 data_fetcher.py 中的 DATA_DIR 保持一致！
-        # 原来的 data_market/ 是错误的，会导致数据无法提交
+        # 添加行情目录 (必须是 data_cache/)
         git add data_cache/ || true
         
         # 检查变动并提交
