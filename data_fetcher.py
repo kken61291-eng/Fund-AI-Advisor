@@ -151,11 +151,11 @@ class DataFetcher:
             df.to_csv(file_path)
             logger.info(f"💾 [{source}] {fund_code} 数据已保存至 {file_path} (含抓取时间字段 fetch_time)")
             
-            # [新增优化] 如果是东财数据，强制等待 50 秒，防止接口封禁
+            # [新增优化] 如果是东财数据，强制等待 40 秒，防止接口封禁
             # 这样可以最大程度保证后续的基金也能用到东财数据
             if source == "东财":
-                logger.info("⏳ [东财] 触发频率保护机制，等待 50 秒...")
-                time.sleep(30)
+                logger.info("⏳ [东财] 触发频率保护机制，等待 40 秒...")
+                time.sleep(40)
                 
             return True
         else:
