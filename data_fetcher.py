@@ -5,7 +5,35 @@ import random
 import os
 import yaml
 from datetime import datetime, time as dt_time
-from utils import logger, retry, get_beijing_time
+# 注意：如果 utils 模块不存在，需确保 get_beijing_time 能正常工作，这里补充一个简易实现（可根据实际情况替换）
+import logging
+
+# ===================== 临时补充 utils 模块缺失的部分（如果需要） =====================
+# 如果你的环境中已有 utils 模块，可删除这部分
+def get_beijing_time():
+    """获取北京时间（东八区）"""
+    from datetime import timezone, timedelta
+    return datetime.now(timezone(timedelta(hours=8)))
+
+# 简易日志配置
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def retry(retries=3, delay=5):
+    """简易重试装饰器"""
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            for i in range(retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    if i == retries - 1:
+                        raise e
+                    time.sleep(delay)
+            return None
+        return wrapper
+    return decorator
+# ====================================================================================
 
 class DataFetcher:
     def __init__(self):
@@ -59,8 +87,15 @@ class DataFetcher:
             df.rename(columns=rename_map, inplace=True)
             df['date'] = pd.to_datetime(df['date'])
             df.set_index('date', inplace=True)
+            # ========== 新增：添加数据抓取时间字段 ==========
+            # 获取当前北京时间（精确到秒），作为抓取时间戳
+            fetch_time = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+            df['fetch_time'] = fetch_time  # 为每条数据添加抓取时间
+            # ==============================================
             if not df.empty: return df, "东财"
-        except: pass
+        except Exception as e:
+            logger.error(f"东财数据源异常: {e}")
+            pass
 
         # 2. 新浪 (Sina)
         try:
@@ -76,8 +111,14 @@ class DataFetcher:
                 # 类型清洗
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce')
+                # ========== 新增：添加数据抓取时间字段 ==========
+                fetch_time = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                df['fetch_time'] = fetch_time
+                # ==============================================
                 return df, "新浪"
-        except: pass
+        except Exception as e:
+            logger.error(f"新浪数据源异常: {e}")
+            pass
 
         # 3. 腾讯 (Tencent)
         try:
@@ -89,8 +130,14 @@ class DataFetcher:
                 df.rename(columns=rename_map, inplace=True)
                 df['date'] = pd.to_datetime(df['date'])
                 df.set_index('date', inplace=True)
+                # ========== 新增：添加数据抓取时间字段 ==========
+                fetch_time = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                df['fetch_time'] = fetch_time
+                # ==============================================
                 if not df.empty: return df, "腾讯"
-        except: pass
+        except Exception as e:
+            logger.error(f"腾讯数据源异常: {e}")
+            pass
         
         return None, None
 
@@ -102,7 +149,7 @@ class DataFetcher:
         if df is not None and not df.empty:
             file_path = os.path.join(self.DATA_DIR, f"{fund_code}.csv")
             df.to_csv(file_path)
-            logger.info(f"💾 [{source}] {fund_code} 数据已保存至 {file_path}")
+            logger.info(f"💾 [{source}] {fund_code} 数据已保存至 {file_path} (含抓取时间字段 fetch_time)")
             
             # [新增优化] 如果是东财数据，强制等待 50 秒，防止接口封禁
             # 这样可以最大程度保证后续的基金也能用到东财数据
@@ -134,6 +181,11 @@ class DataFetcher:
             if 'date' in df.columns:
                 df['date'] = pd.to_datetime(df['date'])
                 df.set_index('date', inplace=True)
+            
+            # ========== 新增：解析抓取时间字段为 datetime 类型 ==========
+            if 'fetch_time' in df.columns:
+                df['fetch_time'] = pd.to_datetime(df['fetch_time'])
+            # ===========================================================
             
             self._verify_data_freshness(df, fund_code, "本地缓存")
             return df
@@ -186,4 +238,4 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"❌ 更新异常 {name}: {e}")
             
-    print(f"🏁 行情更新完成: {success_count}/{len(funds)}")
+    print(f"🏁 行情更新完成: {success_count}/{len(funds)} (已添加 fetch_time 时间字段)")
