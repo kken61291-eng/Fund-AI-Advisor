@@ -68,8 +68,8 @@ def send_email(subject, html_content, attachment_path=None):
     try:
         msg = MIMEMultipart()
         msg['Subject'] = subject
-        # [关键修复] 使用 formataddr 确保格式标准
-        msg['From'] = formataddr(["玄铁量化", sender])
+        # [修改点] 发件人改为 "鹊知风"
+        msg['From'] = formataddr(["鹊知风", sender])
         msg['To'] = formataddr(["Investor", receiver])
         
         msg.attach(MIMEText(html_content, 'html', 'utf-8'))
