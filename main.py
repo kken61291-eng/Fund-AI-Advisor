@@ -2,7 +2,7 @@ import yaml
 import os
 import threading
 import json
-import base64  # 新增: 用于将本地图片转换为Base64编码嵌入HTML
+import base64  # 用于将本地图片转换为Base64编码嵌入HTML
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from data_fetcher import DataFetcher
 from news_analyst import NewsAnalyst
@@ -12,7 +12,7 @@ from portfolio_tracker import PortfolioTracker
 from utils import send_email, logger, LOG_FILENAME
 
 # --- 全局配置 ---
-DEBUG_MODE = True
+DEBUG_MODE = True  
 tracker_lock = threading.Lock()
 
 def load_config():
@@ -215,34 +215,36 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
         except Exception as e:
             logger.error(f"Render Error {r.get('name')}: {e}")
     
-    # --- LOGO 处理逻辑 (优先使用本地文件以支持透明背景) ---
-    logo_path = "logo.png"  # 优先: 标准文件名
-    alt_logo_path = "Gemini_Generated_Image_d7oeird7oeird7oe.jpg" # 备选: 用户提供的原始文件名
+    # --- LOGO 智能处理逻辑 ---
+    logo_path = "logo.png"
+    alt_logo_path = "Gemini_Generated_Image_d7oeird7oeird7oe.jpg"
     
-    # 如果用户上传的文件存在，优先使用它
-    if os.path.exists(alt_logo_path) and not os.path.exists(logo_path):
-        logo_path = alt_logo_path
+    # 默认使用原有的 GitHub 链接
+    logo_src = "https://raw.githubusercontent.com/kken61291-eng/Fund-AI-Advisor/main/logo.png"
 
-    # 默认使用 GitHub 链接作为兜底
-    logo_url = "https://raw.githubusercontent.com/kken61291-eng/Fund-AI-Advisor/main/logo.png"
-
+    # 自动搜索本地新 logo 文件
+    current_logo = None
     if os.path.exists(logo_path):
+        current_logo = logo_path
+    elif os.path.exists(alt_logo_path):
+        current_logo = alt_logo_path
+        
+    if current_logo:
         try:
-            with open(logo_path, "rb") as img_file:
-                # 读取本地文件并转换为Base64编码，直接嵌入HTML，这样不需要图床也能显示
-                b64_data = base64.b64encode(img_file.read()).decode('utf-8')
-                # 即使后缀是jpg，为了透明通道通常建议作为png处理，但这里根据后缀稍微区分一下
-                mime_type = "image/jpeg" if logo_path.lower().endswith(".jpg") or logo_path.lower().endswith(".jpeg") else "image/png"
-                logo_url = f"data:{mime_type};base64,{b64_data}"
-                logger.info(f"✅ 已加载本地 Logo: {logo_path}")
+            with open(current_logo, "rb") as image_file:
+                # 转换为 Base64，这样即使是本地文件也能在邮件中作为透明 Logo 显示
+                encoded_string = base64.b64encode(image_file.read()).decode()
+                mime_type = "image/png" if current_logo.endswith('png') else "image/jpeg"
+                logo_src = f"data:{mime_type};base64,{encoded_string}"
+                logger.info(f"🎨 已成功加载本地 Logo 资源: {current_logo}")
         except Exception as e:
-            logger.error(f"❌ 加载本地 Logo 失败: {e}")
-    
+            logger.error(f"Logo 转换失败: {e}")
+
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
     body {{ background: {COLOR_BG_MAIN}; color: {COLOR_TEXT_MAIN}; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; max-width: 660px; margin: 0 auto; padding: 20px; }}
     .main-container {{ border: 1px solid {COLOR_BORDER}; border-top: 4px solid {COLOR_GOLD}; border-radius: 6px; padding: 20px; background: linear-gradient(180deg, #14171a 0%, #0a0c0e 100%); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }}
     .header {{ text-align: center; border-bottom: 1px solid {COLOR_BORDER}; padding-bottom: 20px; margin-bottom: 25px; }}
-    .logo-img {{ width: 100%; height: auto; object-fit: contain; display: block; margin: 0 auto;filter: drop-shadow(0 0 5px {COLOR_GOLD}33); }}
+    .logo-img {{ width: 280px; height: auto; object-fit: contain; display: block; margin: 0 auto; filter: drop-shadow(0 0 8px {COLOR_GOLD}44); }}
     .subtitle {{ font-size: 11px; color: {COLOR_TEXT_SUB}; margin-top: 12px; text-transform: uppercase; letter-spacing: 2px; }}
     .radar-panel {{ background: {COLOR_BG_CARD}; border: 1px solid {COLOR_BORDER}; border-radius: 4px; padding: 15px; margin-bottom: 25px; }}
     .radar-title {{ font-size: 14px; color: {COLOR_GOLD}; font-weight: bold; margin-bottom: 12px; border-bottom: 1px solid #333; padding-bottom: 6px; letter-spacing: 1px; display:flex; align-items:center; }}
@@ -255,13 +257,11 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
     .advisor-section {{ background: linear-gradient(to bottom, #252010, #0f1215); border: 1px solid #4a3b10; border-left: 3px solid {COLOR_GOLD}; padding: 20px; margin-bottom: 30px; border-radius: 4px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); position: relative; }}
 
     /* --- 核心修复: 强力去除白色背景 --- */
-    /* 强制所有容器、段落、列表、引用块背景透明，文字颜色为亮色 */
     .cio-section *, .advisor-section * {{ color: {COLOR_TEXT_MAIN} !important; line-height: 1.6; background-color: transparent !important; }}
     
-    /* 针对 pre/code/blockquote (通常是白底的元凶) 设置深色半透明背景 */
     .cio-section pre, .cio-section code, .cio-section blockquote, 
     .advisor-section pre, .advisor-section code, .advisor-section blockquote {{
-        background-color: rgba(0, 0, 0, 0.4) !important; /* 深色半透明 */
+        background-color: rgba(0, 0, 0, 0.4) !important; 
         color: #e9ecef !important;
         border: 1px solid #444 !important;
         border-radius: 4px;
@@ -280,7 +280,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
     
     .section-title {{ font-size: 16px; font-weight: bold; margin-bottom: 15px; color: {COLOR_TEXT_MAIN}; text-transform: uppercase; letter-spacing: 1px; text-shadow: 0 2px 4px rgba(0,0,0,0.8); display:flex; align-items:center; }}
     .footer {{ text-align: center; font-size: 10px; color: #555; margin-top: 40px; border-top: 1px solid #222; padding-top: 15px; }} 
-    </style></head><body><div class="main-container"><div class="header"><img src="{logo_url}" alt="QUEZHIFENG QUANT" class="logo-img"><div class="subtitle">MAGPIE SENSES THE WIND | V15.20 DARK FINANCE UI</div></div><div class="radar-panel"><div class="radar-title">7x24 GLOBAL LIVE WIRE</div>{news_html}</div><div class="cio-section"><div class="section-title"><span style="margin-right:6px;">🛑</span>CIO 战略审计</div>{cio_html}</div><div class="advisor-section"><div class="section-title" style="color: {COLOR_GOLD};"><span style="margin-right:6px;">🐦</span>鹊知风·场外实战复盘</div>{advisor_html}</div>{rows}<div class="footer">EST. 2026 | POWERED BY AKSHARE & EM | V15.20</div></div></body></html>"""
+    </style></head><body><div class="main-container"><div class="header"><img src="{logo_src}" alt="QUEZHIFENG QUANT" class="logo-img"><div class="subtitle">MAGPIE SENSES THE WIND | V15.20 DARK FINANCE UI</div></div><div class="radar-panel"><div class="radar-title">7x24 GLOBAL LIVE WIRE</div>{news_html}</div><div class="cio-section"><div class="section-title"><span style="margin-right:6px;">🛑</span>CIO 战略审计</div>{cio_html}</div><div class="advisor-section"><div class="section-title" style="color: {COLOR_GOLD};"><span style="margin-right:6px;">🐦</span>鹊知风·场外实战复盘</div>{advisor_html}</div>{rows}<div class="footer">EST. 2026 | POWERED BY AKSHARE & EM | V15.20</div></div></body></html>"""
 
 def process_single_fund(fund, config, fetcher, tracker, val_engine, analyst, market_context, base_amt, max_daily):
     res = None
