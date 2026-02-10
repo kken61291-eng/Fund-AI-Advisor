@@ -2,8 +2,7 @@ requests
 pandas
 numpy
 pyyaml
-# [关键修复] 强制锁定已知可用的稳定版本，防止自动升级导致接口消失
-akshare==1.18.22
+akshare
 scikit-learn
 schedule
 retrying
@@ -14,3 +13,6 @@ openpyxl
 jinja2
 ta>=0.10.0
 pytz
+# [新增] 模拟浏览器必须的库
+selenium
+webdriver-manager
