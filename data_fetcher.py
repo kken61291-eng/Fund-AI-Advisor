@@ -50,9 +50,9 @@ class DataFetcher:
         [私有方法] 纯联网获取数据 (东财 -> 新浪 -> 腾讯)
         供 update_cache 调用
         """
-        # 1. 东财 (EastMoney)
+        # 1. 东财 (EastMoney) - 优先数据源
         try:
-            # 模拟随机延时
+            # 模拟随机延时 (基础延时)
             time.sleep(random.uniform(1.0, 2.0)) 
             df = ak.fund_etf_hist_em(symbol=fund_code, period="daily", start_date="20200101", end_date="20500101", adjust="qfq")
             rename_map = {'日期':'date', '开盘':'open', '收盘':'close', '最高':'high', '最低':'low', '成交量':'volume'}
@@ -103,6 +103,13 @@ class DataFetcher:
             file_path = os.path.join(self.DATA_DIR, f"{fund_code}.csv")
             df.to_csv(file_path)
             logger.info(f"💾 [{source}] {fund_code} 数据已保存至 {file_path}")
+            
+            # [新增优化] 如果是东财数据，强制等待 50 秒，防止接口封禁
+            # 这样可以最大程度保证后续的基金也能用到东财数据
+            if source == "东财":
+                logger.info("⏳ [东财] 触发频率保护机制，等待 50 秒...")
+                time.sleep(50)
+                
             return True
         else:
             logger.error(f"❌ {fund_code} 所有数据源(东财/新浪/腾讯)均获取失败")
@@ -139,7 +146,7 @@ class DataFetcher:
 # [新增] 独立运行入口 (让此脚本变身爬虫)
 # ==========================================
 if __name__ == "__main__":
-    print("🚀 [DataFetcher] 启动多源行情抓取 (V15.14 Full Mode)...")
+    print("🚀 [DataFetcher] 启动多源行情抓取 (V15.15 Full Mode)...")
     
     # 1. 简易加载 Config
     def load_config_local():
@@ -168,10 +175,14 @@ if __name__ == "__main__":
         
         try:
             # 调用 update_cache 进行联网下载
+            # 注意：update_cache 内部现在包含了针对东财的 50s 等待逻辑
             if fetcher.update_cache(code):
                 success_count += 1
-            # 避免请求过快
+            
+            # 基础间隔，避免非东财源时请求过快
+            # 如果刚刚触发了东财的50s等待，这里额外多睡1-2s也无妨
             time.sleep(random.uniform(1.0, 2.0))
+            
         except Exception as e:
             print(f"❌ 更新异常 {name}: {e}")
             
