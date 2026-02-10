@@ -46,8 +46,8 @@ class NewsAnalyst:
             df = ak.stock_telegraph_em()
             news = []
             
-            # 抓取 100 条作为候选池
-            for i in range(min(100, len(df))):
+            # 放开数量限制，尽量多抓，后续靠 Token 排序截断
+            for i in range(min(200, len(df))):
                 title = str(df.iloc[i].get('title') or '')
                 content = str(df.iloc[i].get('content') or '')
                 t = str(df.iloc[i].get('public_time') or '')
@@ -56,10 +56,8 @@ class NewsAnalyst:
                 # 宽松过滤
                 if self._is_valid_news(title):
                     item_str = f"[{t}] {title}"
-                    # [关键修复] 把内容加回来！
-                    # 使用特殊前缀 (摘要:)，方便 main.py 识别并过滤
+                    # [关键] 拼入内容供 AI 读取
                     if len(content) > 10 and content != title:
-                        # 限制摘要长度，保留核心信息给 AI
                         item_str += f"\n   (摘要: {content[:300]})"
                     news.append(item_str)
             return news
@@ -79,18 +77,18 @@ class NewsAnalyst:
 
     def get_market_context(self, max_length=35000): 
         """
-        [核心逻辑] 按 Token/长度 限制
+        [核心逻辑升级] 收集 -> 去重 -> 排序 -> 截断
         """
         news_candidates = []
         today_str = get_beijing_time().strftime("%Y-%m-%d")
         file_path = f"data_news/news_{today_str}.jsonl"
         
-        # 1. 优先读取实时电报
+        # 1. 读取实时电报
         live_news = self._fetch_live_patch()
         if live_news:
             news_candidates.extend(live_news)
             
-        # 2. 补充本地缓存的历史新闻
+        # 2. 读取本地缓存
         if os.path.exists(file_path):
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
@@ -106,7 +104,6 @@ class NewsAnalyst:
                             content = str(item.get('content') or item.get('digest') or "")
                             
                             news_entry = f"[{t_str}] {title}"
-                            # [关键修复] 本地新闻也把内容加回来
                             if len(content) > 10:
                                 news_entry += f"\n   (摘要: {content[:300]})"
                                 
@@ -119,13 +116,19 @@ class NewsAnalyst:
         unique_news = []
         seen = set()
         for n in news_candidates:
-            # 只用标题部分去重 (第一行)
             title_part = n.split('\n')[0]
             if title_part not in seen:
                 seen.add(title_part)
                 unique_news.append(n)
         
-        # 4. 按长度截断
+        # 4. [关键修复] 强制按时间戳倒序排序
+        # 格式为 "[MM-DD HH:MM] ..."，字符串排序即可满足同一年内的倒序需求
+        try:
+            unique_news.sort(key=lambda x: x[:17], reverse=True)
+        except:
+            pass # 如果格式异常，保持原序
+        
+        # 5. 按长度截断
         final_list = []
         current_len = 0
         
@@ -135,9 +138,8 @@ class NewsAnalyst:
                 final_list.append(news_item)
                 current_len += item_len + 1 
             else:
-                break
+                break # 满了就停，丢弃的一定是最旧的
         
-        # 使用换行符连接
         final_text = "\n".join(final_list)
         
         return final_text if final_text else "今日暂无重大新闻。"
@@ -184,7 +186,7 @@ class NewsAnalyst:
         【💀 鹊知风实战经验库】
         {expert_rules}
         
-        【舆情扫描 (含详细摘要)】
+        【舆情扫描 (按时间倒序优先)】
         {str(news)[:25000]}
 
         【任务】
