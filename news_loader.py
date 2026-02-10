@@ -2,10 +2,12 @@ import akshare as ak
 import json
 import os
 import time
+import requests
 import pandas as pd
 from datetime import datetime
 import hashlib
 import pytz
+import re
 from bs4 import BeautifulSoup
 
 # --- Selenium 模块 (模拟浏览器专用) ---
@@ -44,13 +46,62 @@ def clean_time_str(t_str):
         return str(t_str)
 
 # ==========================================
-# 1. 东财抓取 (API模式)
+# 1. 东财抓取 (双保险模式)
 # ==========================================
-def fetch_eastmoney():
+def fetch_eastmoney_direct():
+    """
+    [Plan B] 不依赖 akshare，直接请求东财接口
+    """
     items = []
     try:
-        print("   - [API] 正在抓取: 东方财富 (EastMoney)...")
-        # 强制更新一下接口
+        print("   - [Plan B] 启动东财直连模式 (Direct API)...")
+        # 东财 7x24 快讯接口
+        url = "https://newsapi.eastmoney.com/kuaixun/v1/getlist_102_ajaxResult_50_1_.html"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        resp = requests.get(url, headers=headers, timeout=10)
+        
+        if resp.status_code == 200:
+            text = resp.text
+            # 接口返回的是 var ajaxResult = { ... }; 格式，需要提取 JSON
+            match = re.search(r'var ajaxResult\s*=\s*({.*});', text, re.DOTALL)
+            if match:
+                json_str = match.group(1)
+                data = json.loads(json_str)
+                news_list = data.get('LivesList', [])
+                
+                for news in news_list:
+                    title = news.get('title', '').strip()
+                    digest = news.get('digest', '').strip()
+                    show_time = news.get('showtime', '') # 格式通常为 2026-02-10 12:00:00
+                    
+                    # 内容处理
+                    content = digest if len(digest) > len(title) else title
+                    
+                    if not title: continue
+                    
+                    items.append({
+                        "time": show_time,
+                        "title": title,
+                        "content": content,
+                        "source": "EastMoney"
+                    })
+                print(f"   - [Plan B] 成功获取 {len(items)} 条数据")
+            else:
+                print("   - [Plan B] 数据解析失败")
+        else:
+            print(f"   - [Plan B] HTTP请求失败: {resp.status_code}")
+            
+    except Exception as e:
+        print(f"   ❌ [Plan B] 东财直连失败: {e}")
+    return items
+
+def fetch_eastmoney():
+    items = []
+    # --- 尝试 Plan A: Akshare ---
+    try:
+        print("   - [Plan A] 正在抓取: 东方财富 (Akshare)...")
         df_em = ak.stock_telegraph_em()
         if df_em is not None and not df_em.empty:
             for _, row in df_em.iterrows():
@@ -65,9 +116,15 @@ def fetch_eastmoney():
                     "content": content,
                     "source": "EastMoney"
                 })
+            print(f"   - [Plan A] 成功获取 {len(items)} 条数据")
+            return items
+    except AttributeError:
+        print("   ⚠️ Akshare 版本不兼容 (AttributeError)，切换至 Plan B...")
     except Exception as e:
-        print(f"   ❌ 东财抓取失败: {e}")
-    return items
+        print(f"   ⚠️ Akshare 调用出错: {e}，切换至 Plan B...")
+
+    # --- 失败则执行 Plan B: Direct API ---
+    return fetch_eastmoney_direct()
 
 # ==========================================
 # 2. 财联社抓取 (浏览器模式)
@@ -87,7 +144,7 @@ def fetch_cls_selenium():
 
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=chrome_options)
-        driver.set_page_load_timeout(60) # 增加超时
+        driver.set_page_load_timeout(60)
         
         url = "https://www.cls.cn/telegraph"
         driver.get(url)
@@ -155,17 +212,14 @@ def fetch_cls_selenium():
 # ==========================================
 def fetch_and_save_news():
     today_date = get_today_str()
-    print(f"📡 [NewsLoader] 启动混合抓取 (Akshare + Selenium) - {today_date}...")
+    print(f"📡 [NewsLoader] 启动混合抓取 (Smart Mode) - {today_date}...")
     
     all_news_items = []
 
-    # 1. 东财 (API)
+    # 1. 东财 (API + 直连备份)
     em_items = fetch_eastmoney()
     all_news_items.extend(em_items)
 
-    # ==========================================
-    # [新增] 强制等待 50 秒
-    # ==========================================
     print(f"⏳ 东财抓取完毕，正在休眠 50 秒 (避免请求过快)...")
     time.sleep(50)
 
