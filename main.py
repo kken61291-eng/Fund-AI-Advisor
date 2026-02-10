@@ -94,7 +94,7 @@ def calculate_position_v13(tech, ai_adj, ai_decision, val_mult, val_desc, base_a
     if final_mult < 0 and pos['shares'] > 0 and held_days < 7:
         final_mult = 0; reasons.append(f"规则:锁仓({held_days}天)")
 
-    # 8. 计算最终金额
+    # 8. 金额计算
     final_amt = 0; is_sell = False; sell_val = 0; label = "观望"
     if final_mult > 0:
         amt = int(base_amt * final_mult)
@@ -111,18 +111,16 @@ def calculate_position_v13(tech, ai_adj, ai_decision, val_mult, val_desc, base_a
 
 def render_html_report_v13(all_news, results, cio_html, advisor_html):
     """
-    生成完整的 HTML 邮件报告 (V15.14 经典样式：只显示标题，时间右对齐)
+    生成完整的 HTML 邮件报告 (带图片LOGO + 深色表格修复)
     """
     news_html = ""
-    # [UI 还原] 经典列表循环，不解析摘要
+    # [UI 逻辑] 只显示标题行
     if isinstance(all_news, list):
         for i, news in enumerate(all_news):
-            # 处理字典或字符串
             if isinstance(news, dict):
                 title = news.get('title', 'No Title')
                 time_str = news.get('time', '')
             else:
-                # 尝试解析 [时间] 标题 格式
                 raw_text = str(news)
                 if raw_text.startswith('[') and '] ' in raw_text:
                     parts = raw_text.split('] ', 1)
@@ -132,7 +130,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
                     title = raw_text
                     time_str = ""
             
-            # [UI 还原] V15.14 经典 CSS: 虚线底边，时间右浮动，灰色小字
+            # 经典列表样式
             news_html += f"""<div style="font-size:11px;color:#ccc;margin-bottom:5px;border-bottom:1px dashed #333;padding-bottom:3px;"><span style="color:#ffb74d;margin-right:4px;">●</span>{title}<span style="float:right;color:#666;font-size:10px;">{time_str}</span></div>"""
     
     def render_dots(hist):
@@ -207,9 +205,39 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
             rows += f"""<div style="background:{bg_gradient};border-left:4px solid {border_color};margin-bottom:15px;padding:15px;border-radius:6px;box-shadow:0 4px 10px rgba(0,0,0,0.6);border-top:1px solid #333;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><div><span style="font-size:18px;font-weight:bold;color:#f0e6d2;font-family:'Times New Roman',serif;">{r['name']}</span><span style="font-size:12px;color:#9ca3af;margin-left:5px;">{r['code']}</span></div><div style="text-align:right;"><div style="color:#ffb74d;font-weight:bold;font-size:16px;text-shadow:0 0 5px rgba(255,183,77,0.3);">{final_score}</div><div style="font-size:9px;color:#aaa;">BASE:{base_score} <span style="color:{'#ff5252' if ai_adj>0 else ('#69f0ae' if ai_adj<0 else '#777')}">{ai_adj:+d}</span></div></div></div><div style="background:rgba(0,0,0,0.3);padding:6px 10px;border-radius:4px;margin-bottom:10px;display:flex;align-items:center;border-left:2px solid {cro_border_color};"><span style="font-size:11px;color:#aaa;margin-right:8px;">🛡️ 技术风控:</span><span style="font-size:11px;{cro_style}">{cro_comment}</span></div><div style="display:flex;justify-content:space-between;color:#e0e0e0;font-size:15px;margin-bottom:5px;border-bottom:1px solid #444;padding-bottom:5px;"><span style="font-weight:bold;color:#ffb74d;">{r.get('position_type')}</span><span style="font-family:'Courier New',monospace;">{act_html}</span></div>{profit_html}<div style="font-size:11px;margin-bottom:8px;border-bottom:1px dashed #333;padding-bottom:5px;"><span style="color:#888;">周期定位:</span> <span style="{val_style}">{val_desc}</span></div><div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:5px;font-size:11px;color:#bdbdbd;font-family:'Courier New',monospace;margin-bottom:4px;"><span>RSI: {tech.get('rsi','-')}</span><span>MACD: {tech.get('macd',{}).get('trend','-')}</span><span>OBV: {obv_text}</span><span>Wkly: {tech.get('trend_weekly','-')}</span></div><div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:5px;font-size:11px;color:#bdbdbd;font-family:'Courier New',monospace;margin-bottom:8px;"><span style="{vol_style}">VR: {vol_ratio}</span><span>Div: {risk.get('divergence','无')}</span><span>%B: {risk.get('bollinger_pct_b',0.5)}</span></div><div style="margin-bottom:8px;">{reasons}</div><div style="margin-top:5px;">{render_dots(r.get('history',[]))}</div>{committee_html}</div>"""
         except Exception as e:
             logger.error(f"Render Error {r.get('name')}: {e}")
-            
-    # [UI 还原] 恢复 "QUEZHIFENG QUANT" 和 "MAGPIE SENSES THE WIND"
-    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {{ background: #0a0a0a; color: #f0e6d2; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; max-width: 660px; margin: 0 auto; padding: 20px; }} .main-container {{ border: 2px solid #333; border-top: 5px solid #ffb74d; border-radius: 4px; padding: 20px; background: linear-gradient(180deg, #1b1b1b 0%, #000000 100%); }} .header {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 25px; }} .title {{ color: #ffb74d; margin: 0; font-size: 32px; font-weight: 800; font-family: 'Times New Roman', serif; letter-spacing: 2px; }} .subtitle {{ font-size: 11px; color: #888; margin-top: 8px; text-transform: uppercase; }} .radar-panel {{ background: #111; border: 1px solid #333; border-radius: 4px; padding: 15px; margin-bottom: 25px; }} .radar-title {{ font-size: 14px; color: #ffb74d; font-weight: bold; margin-bottom: 12px; border-bottom: 1px solid #444; padding-bottom: 6px; letter-spacing: 1px; }} .cio-section {{ background: linear-gradient(145deg, #1a0505, #2b0b0b); border: 1px solid #5c1818; border-left: 4px solid #d32f2f; padding: 20px; margin-bottom: 20px; border-radius: 2px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }} .cio-section * {{ color: #ffffff !important; line-height: 1.6; }} .cio-section h3 {{ border-bottom: 1px dashed #5c1818; padding-bottom: 5px; margin-top: 15px; margin-bottom: 8px; display: block; width: 100%; }} .advisor-section {{ background: #0f0f0f; border: 1px solid #d4af37; border-left: 4px solid #ffd700; padding: 20px; margin-bottom: 30px; border-radius: 4px; box-shadow: 0 0 10px rgba(212, 175, 55, 0.2); position: relative; }} .advisor-section * {{ color: #ffffff !important; line-height: 1.6; font-family: 'Georgia', serif; }} .advisor-section h4 {{ color: #ffd700 !important; margin-top: 15px; margin-bottom: 8px; border-bottom: 1px dashed #333; padding-bottom: 4px; }} .section-title {{ font-size: 16px; font-weight: bold; margin-bottom: 15px; color: #eee; text-transform: uppercase; letter-spacing: 1px; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }} .footer {{ text-align: center; font-size: 10px; color: #444; margin-top: 40px; }} </style></head><body><div class="main-container"><div class="header"><h1 class="title">QUEZHIFENG QUANT</h1><div class="subtitle">MAGPIE SENSES THE WIND | V15.15 FULL CONTEXT</div></div><div class="radar-panel"><div class="radar-title">📡 7x24 GLOBAL LIVE WIRE</div>{news_html}</div><div class="cio-section"><div class="section-title">🛑 CIO 战略审计</div>{cio_html}</div><div class="advisor-section"><div class="section-title" style="color: #ffd700;">🐦 鹊知风·场外实战复盘</div>{advisor_html}</div>{rows}<div class="footer">EST. 2026 | POWERED BY AKSHARE & EM | V15.15</div></div></body></html>"""
+    
+    # [Logo 替换] 将之前的文字标题替换为图片
+    # 注意：请务必将 logo.png 上传到 GitHub 仓库根目录
+    logo_url = "https://raw.githubusercontent.com/kken61291-eng/Fund-AI-Advisor/main/logo.png"
+    
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    body {{ background: #0a0a0a; color: #f0e6d2; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; max-width: 660px; margin: 0 auto; padding: 20px; }}
+    .main-container {{ border: 2px solid #333; border-top: 5px solid #ffb74d; border-radius: 4px; padding: 20px; background: linear-gradient(180deg, #1b1b1b 0%, #000000 100%); }}
+    .header {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 25px; }}
+    
+    /* Logo 样式 */
+    .logo-img {{ max-width: 200px; height: auto; display: block; margin: 0 auto; }}
+    
+    .subtitle {{ font-size: 11px; color: #888; margin-top: 10px; text-transform: uppercase; }}
+    .radar-panel {{ background: #111; border: 1px solid #333; border-radius: 4px; padding: 15px; margin-bottom: 25px; }}
+    .radar-title {{ font-size: 14px; color: #ffb74d; font-weight: bold; margin-bottom: 12px; border-bottom: 1px solid #444; padding-bottom: 6px; letter-spacing: 1px; }}
+    
+    /* CIO Section 样式 */
+    .cio-section {{ background: linear-gradient(145deg, #1a0505, #2b0b0b); border: 1px solid #5c1818; border-left: 4px solid #d32f2f; padding: 20px; margin-bottom: 20px; border-radius: 2px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }}
+    .cio-section * {{ color: #ffffff !important; line-height: 1.6; }}
+    .cio-section h3 {{ border-bottom: 1px dashed #5c1818; padding-bottom: 5px; margin-top: 15px; margin-bottom: 8px; display: block; width: 100%; color: #ffb74d !important; }}
+    
+    /* [修复] 强制表格透明底色，解决文字看不清的问题 */
+    .cio-section table {{ width: 100%; border-collapse: collapse; margin: 15px 0; color: #e0e0e0 !important; background-color: transparent !important; font-size: 11px; }}
+    .cio-section th {{ background-color: rgba(255, 183, 77, 0.1) !important; color: #ffb74d !important; border: 1px solid #444 !important; padding: 8px; text-align: left; }}
+    .cio-section td {{ border: 1px solid #333 !important; padding: 8px; background-color: rgba(255, 255, 255, 0.02) !important; }}
+    
+    .advisor-section {{ background: #0f0f0f; border: 1px solid #d4af37; border-left: 4px solid #ffd700; padding: 20px; margin-bottom: 30px; border-radius: 4px; box-shadow: 0 0 10px rgba(212, 175, 55, 0.2); position: relative; }}
+    .advisor-section * {{ color: #ffffff !important; line-height: 1.6; font-family: 'Georgia', serif; }}
+    .advisor-section h4 {{ color: #ffd700 !important; margin-top: 15px; margin-bottom: 8px; border-bottom: 1px dashed #333; padding-bottom: 4px; }}
+    .section-title {{ font-size: 16px; font-weight: bold; margin-bottom: 15px; color: #eee; text-transform: uppercase; letter-spacing: 1px; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }}
+    .footer {{ text-align: center; font-size: 10px; color: #444; margin-top: 40px; }} 
+    </style></head><body><div class="main-container"><div class="header"><img src="{logo_url}" alt="QUEZHIFENG QUANT" class="logo-img"><div class="subtitle">MAGPIE SENSES THE WIND | V15.15 FULL CONTEXT</div></div><div class="radar-panel"><div class="radar-title">📡 7x24 GLOBAL LIVE WIRE</div>{news_html}</div><div class="cio-section"><div class="section-title">🛑 CIO 战略审计</div>{cio_html}</div><div class="advisor-section"><div class="section-title" style="color: #ffd700;">🐦 鹊知风·场外实战复盘</div>{advisor_html}</div>{rows}<div class="footer">EST. 2026 | POWERED BY AKSHARE & EM | V15.15</div></div></body></html>"""
 
 def process_single_fund(fund, config, fetcher, tracker, val_engine, analyst, market_context, base_amt, max_daily):
     res = None
@@ -306,7 +334,7 @@ def main():
     if market_context and market_context != "今日暂无重大新闻。":
         for line in market_context.split('\n'):
             try:
-                # [关键过滤] 只取标题行（以 [ 开头），过滤掉内容摘要行
+                # [关键过滤] 只保留标题行，过滤掉摘要行
                 if line.strip().startswith('['):
                     all_news_seen.append(line.strip())
             except Exception:
