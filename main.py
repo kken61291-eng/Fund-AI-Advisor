@@ -110,17 +110,17 @@ def calculate_position_v13(tech, ai_adj, ai_decision, val_mult, val_desc, base_a
 
 def render_html_report_v13(all_news, results, cio_html, advisor_html):
     """
-    生成完整的 HTML 邮件报告 (V15.19 UI优化版)
+    生成完整的 HTML 邮件报告 (V15.20 修复版：强力去除白色背景)
     """
     # --- 主色调定义 ---
-    COLOR_GOLD = "#fab005" # 琥珀金
-    COLOR_RED = "#fa5252"  # 现代红
-    COLOR_GREEN = "#51cf66" # 清透绿
+    COLOR_GOLD = "#fab005" 
+    COLOR_RED = "#fa5252"  
+    COLOR_GREEN = "#51cf66" 
     COLOR_TEXT_MAIN = "#e9ecef"
     COLOR_TEXT_SUB = "#adb5bd"
-    COLOR_BG_MAIN = "#0f1215" # 深岩灰背景
-    COLOR_BG_CARD = "#16191d" # 卡片背景
-    COLOR_BORDER = "#2c3e50"  # 深蓝灰色边框
+    COLOR_BG_MAIN = "#0f1215" 
+    COLOR_BG_CARD = "#16191d" 
+    COLOR_BORDER = "#2c3e50"  
 
     news_html = ""
     if isinstance(all_news, list):
@@ -226,22 +226,39 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
     .radar-title {{ font-size: 14px; color: {COLOR_GOLD}; font-weight: bold; margin-bottom: 12px; border-bottom: 1px solid #333; padding-bottom: 6px; letter-spacing: 1px; display:flex; align-items:center; }}
     .radar-title::before {{ content: '📡'; margin-right: 6px; font-size: 12px; }}
     
-    /* [UI调整] CIO 区域: 调整为深黑红渐变，更具融合感 */
+    /* CIO Section: 深黑红渐变 */
     .cio-section {{ background: linear-gradient(to bottom, #251010, #0f1215); border: 1px solid #4a1515; border-left: 3px solid {COLOR_RED}; padding: 20px; margin-bottom: 20px; border-radius: 4px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }}
-    .cio-section * {{ color: {COLOR_TEXT_MAIN} !important; line-height: 1.6; }}
+    
+    /* Advisor Section: 深黑金渐变 */
+    .advisor-section {{ background: linear-gradient(to bottom, #252010, #0f1215); border: 1px solid #4a3b10; border-left: 3px solid {COLOR_GOLD}; padding: 20px; margin-bottom: 30px; border-radius: 4px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); position: relative; }}
+
+    /* --- 核心修复: 强力去除白色背景 --- */
+    /* 强制所有容器、段落、列表、引用块背景透明，文字颜色为亮色 */
+    .cio-section *, .advisor-section * {{ color: {COLOR_TEXT_MAIN} !important; line-height: 1.6; background-color: transparent !important; }}
+    
+    /* 针对 pre/code/blockquote (通常是白底的元凶) 设置深色半透明背景 */
+    .cio-section pre, .cio-section code, .cio-section blockquote, 
+    .advisor-section pre, .advisor-section code, .advisor-section blockquote {{
+        background-color: rgba(0, 0, 0, 0.4) !important; /* 深色半透明 */
+        color: #e9ecef !important;
+        border: 1px solid #444 !important;
+        border-radius: 4px;
+        padding: 10px;
+        white-space: pre-wrap;
+        margin: 10px 0;
+        display: block;
+    }}
+
     .cio-section h3 {{ border-bottom: 1px dashed #5c1818; padding-bottom: 5px; margin-top: 15px; margin-bottom: 8px; display: block; width: 100%; color: {COLOR_GOLD} !important; }}
-    .cio-section table {{ width: 100%; border-collapse: collapse; margin: 15px 0; color: {COLOR_TEXT_MAIN} !important; background-color: transparent !important; font-size: 11px; }}
+    .cio-section table {{ width: 100%; border-collapse: collapse; margin: 15px 0; color: {COLOR_TEXT_MAIN} !important; font-size: 11px; }}
     .cio-section th {{ background-color: rgba(250, 176, 5, 0.1) !important; color: {COLOR_GOLD} !important; border: 1px solid #444 !important; padding: 8px; text-align: left; }}
     .cio-section td {{ border: 1px solid #333 !important; padding: 8px; background-color: rgba(0, 0, 0, 0.3) !important; }}
     
-    /* [UI调整] 顾问 区域: 调整为深黑金渐变，更沉稳 */
-    .advisor-section {{ background: linear-gradient(to bottom, #252010, #0f1215); border: 1px solid #4a3b10; border-left: 3px solid {COLOR_GOLD}; padding: 20px; margin-bottom: 30px; border-radius: 4px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); position: relative; }}
-    .advisor-section * {{ color: {COLOR_TEXT_MAIN} !important; line-height: 1.6; font-family: 'Georgia', serif; }}
     .advisor-section h4 {{ color: {COLOR_GOLD} !important; margin-top: 15px; margin-bottom: 8px; border-bottom: 1px dashed #444; padding-bottom: 4px; }}
     
     .section-title {{ font-size: 16px; font-weight: bold; margin-bottom: 15px; color: {COLOR_TEXT_MAIN}; text-transform: uppercase; letter-spacing: 1px; text-shadow: 0 2px 4px rgba(0,0,0,0.8); display:flex; align-items:center; }}
     .footer {{ text-align: center; font-size: 10px; color: #555; margin-top: 40px; border-top: 1px solid #222; padding-top: 15px; }} 
-    </style></head><body><div class="main-container"><div class="header"><img src="{logo_url}" alt="QUEZHIFENG QUANT" class="logo-img"><div class="subtitle">MAGPIE SENSES THE WIND | V15.19 DARK FINANCE UI</div></div><div class="radar-panel"><div class="radar-title">7x24 GLOBAL LIVE WIRE</div>{news_html}</div><div class="cio-section"><div class="section-title"><span style="margin-right:6px;">🛑</span>CIO 战略审计</div>{cio_html}</div><div class="advisor-section"><div class="section-title" style="color: {COLOR_GOLD};"><span style="margin-right:6px;">🐦</span>鹊知风·场外实战复盘</div>{advisor_html}</div>{rows}<div class="footer">EST. 2026 | POWERED BY AKSHARE & EM | V15.19</div></div></body></html>"""
+    </style></head><body><div class="main-container"><div class="header"><img src="{logo_url}" alt="QUEZHIFENG QUANT" class="logo-img"><div class="subtitle">MAGPIE SENSES THE WIND | V15.20 DARK FINANCE UI</div></div><div class="radar-panel"><div class="radar-title">7x24 GLOBAL LIVE WIRE</div>{news_html}</div><div class="cio-section"><div class="section-title"><span style="margin-right:6px;">🛑</span>CIO 战略审计</div>{cio_html}</div><div class="advisor-section"><div class="section-title" style="color: {COLOR_GOLD};"><span style="margin-right:6px;">🐦</span>鹊知风·场外实战复盘</div>{advisor_html}</div>{rows}<div class="footer">EST. 2026 | POWERED BY AKSHARE & EM | V15.20</div></div></body></html>"""
 
 def process_single_fund(fund, config, fetcher, tracker, val_engine, analyst, market_context, base_amt, max_daily):
     res = None
@@ -320,7 +337,7 @@ def main():
     tracker = PortfolioTracker()
     val_engine = ValuationEngine()
     
-    logger.info(f">>> [V15.19] Startup | LOCAL_MODE=True | News Source: Local Cache + Live Patch")
+    logger.info(f">>> [V15.20] Startup | LOCAL_MODE=True | News Source: Local Cache + Live Patch")
     tracker.confirm_trades()
     try:
         analyst = NewsAnalyst()
@@ -366,6 +383,6 @@ def main():
         
         html = render_html_report_v13(all_news_seen, results, cio_html, advisor_html) 
         
-        send_email("🐦 鹊知风 V15.19 铁拳决议 (Dark Finance UI)", html, attachment_path=LOG_FILENAME)
+        send_email("🐦 鹊知风 V15.20 铁拳决议 (Dark Finance UI)", html, attachment_path=LOG_FILENAME)
 
 if __name__ == "__main__": main()
