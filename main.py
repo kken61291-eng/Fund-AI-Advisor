@@ -70,7 +70,7 @@ def calculate_position_v13(tech, ai_adj, ai_decision, val_mult, val_desc, base_a
     elif tactical_score >= 60: tactical_mult = 0.5; reasons.append("战术:企稳")
     elif tactical_score <= 25: tactical_mult = -1.0; reasons.append("战术:破位")
 
-    # 5. 估值修正
+    # 5. 结合估值系数
     final_mult = tactical_mult
     if tactical_mult > 0:
         if val_mult < 0.5: final_mult = 0; reasons.append(f"战略:高估刹车")
@@ -82,18 +82,19 @@ def calculate_position_v13(tech, ai_adj, ai_decision, val_mult, val_desc, base_a
         if val_mult >= 1.5 and strategy_type in ['core', 'dividend']:
             final_mult = 0.5; reasons.append(f"战略:左侧定投")
 
-    # 6. 风控
+    # 6. 传统技术风控 (CRO)
     if cro_signal == "VETO":
         if final_mult > 0:
             final_mult = 0
             reasons.append(f"🛡️风控:否决买入")
+            logger.info(f"🚫 [风控拦截 {fund_name}] 触发: {tech.get('tech_cro_comment')}")
     
-    # 7. 锁仓
+    # 7. 锁仓规则
     held_days = pos.get('held_days', 999)
     if final_mult < 0 and pos['shares'] > 0 and held_days < 7:
         final_mult = 0; reasons.append(f"规则:锁仓({held_days}天)")
 
-    # 8. 金额计算
+    # 8. 计算最终金额
     final_amt = 0; is_sell = False; sell_val = 0; label = "观望"
     if final_mult > 0:
         amt = int(base_amt * final_mult)
@@ -110,41 +111,22 @@ def calculate_position_v13(tech, ai_adj, ai_decision, val_mult, val_desc, base_a
 
 def render_html_report_v13(all_news, results, cio_html, advisor_html):
     """
-    生成完整的 HTML 邮件报告 (视觉丰富版：显示前50条，含摘要渲染)
+    生成完整的 HTML 邮件报告 (V15.14 经典样式还原：带时间戳右对齐)
     """
     news_html = ""
-    # [UI 恢复] 
-    # 1. 列表切片为 [:50]
-    # 2. 恢复摘要显示逻辑：如果新闻文本中包含换行符（说明有摘要），则进行拆分渲染
     if isinstance(all_news, list):
-        for i, news in enumerate(all_news[:50]): 
-            raw_text = str(news)
-            
-            # 检测是否有摘要 (由 news_analyst.py 拼接的 \n >>> )
-            if "\n" in raw_text:
-                parts = raw_text.split("\n", 1)
-                title_line = parts[0]
-                # 去掉前缀，提取纯内容
-                summary = parts[1].replace(">>> 内容:", "").strip()
-                
-                # [Rich UI] 标题亮色，摘要灰色，增加间距
-                news_html += f"""
-                <div style="margin-bottom:10px;border-bottom:1px dashed #333;padding-bottom:6px;">
-                    <div style="font-size:11px;color:#eee;font-weight:500;">
-                        <span style="color:#ffb74d;margin-right:4px;">●</span>{title_line}
-                    </div>
-                    <div style="font-size:10px;color:#888;margin-left:14px;margin-top:3px;line-height:1.4;">
-                        {summary}
-                    </div>
-                </div>
-                """
+        for i, news in enumerate(all_news[:50]): # 保持50条数量
+            # [UI 还原] 处理字典格式或字符串格式
+            if isinstance(news, dict):
+                title = news.get('title', 'No Title')
+                time_str = news.get('time', '')
             else:
-                # 只有标题的情况
-                news_html += f"""
-                <div style="font-size:11px;color:#ccc;margin-bottom:6px;border-bottom:1px dashed #333;padding-bottom:4px;">
-                    <span style="color:#ffb74d;margin-right:4px;">●</span>{raw_text}
-                </div>
-                """
+                # 兼容字符串格式
+                title = str(news)
+                time_str = ""
+                
+            # [UI 还原] V15.14 的经典 CSS 样式
+            news_html += f"""<div style="font-size:11px;color:#ccc;margin-bottom:5px;border-bottom:1px dashed #333;padding-bottom:3px;"><span style="color:#ffb74d;margin-right:4px;">●</span>{title}<span style="float:right;color:#666;font-size:10px;">{time_str}</span></div>"""
     
     def render_dots(hist):
         h = ""
@@ -219,6 +201,8 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
         except Exception as e:
             logger.error(f"Render Error {r.get('name')}: {e}")
             
+    # [UI 还原] 恢复 "QUEZHIFENG QUANT" 和 "MAGPIE SENSES THE WIND"
+    # 同时保留字体颜色修复逻辑
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {{ background: #0a0a0a; color: #f0e6d2; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; max-width: 660px; margin: 0 auto; padding: 20px; }} .main-container {{ border: 2px solid #333; border-top: 5px solid #ffb74d; border-radius: 4px; padding: 20px; background: linear-gradient(180deg, #1b1b1b 0%, #000000 100%); }} .header {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 25px; }} .title {{ color: #ffb74d; margin: 0; font-size: 32px; font-weight: 800; font-family: 'Times New Roman', serif; letter-spacing: 2px; }} .subtitle {{ font-size: 11px; color: #888; margin-top: 8px; text-transform: uppercase; }} .radar-panel {{ background: #111; border: 1px solid #333; border-radius: 4px; padding: 15px; margin-bottom: 25px; }} .radar-title {{ font-size: 14px; color: #ffb74d; font-weight: bold; margin-bottom: 12px; border-bottom: 1px solid #444; padding-bottom: 6px; letter-spacing: 1px; }} .cio-section {{ background: linear-gradient(145deg, #1a0505, #2b0b0b); border: 1px solid #5c1818; border-left: 4px solid #d32f2f; padding: 20px; margin-bottom: 20px; border-radius: 2px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }} .cio-section * {{ color: #ffffff !important; line-height: 1.6; }} .cio-section h3 {{ border-bottom: 1px dashed #5c1818; padding-bottom: 5px; margin-top: 15px; margin-bottom: 8px; display: block; width: 100%; }} .advisor-section {{ background: #0f0f0f; border: 1px solid #d4af37; border-left: 4px solid #ffd700; padding: 20px; margin-bottom: 30px; border-radius: 4px; box-shadow: 0 0 10px rgba(212, 175, 55, 0.2); position: relative; }} .advisor-section * {{ color: #ffffff !important; line-height: 1.6; font-family: 'Georgia', serif; }} .advisor-section h4 {{ color: #ffd700 !important; margin-top: 15px; margin-bottom: 8px; border-bottom: 1px dashed #333; padding-bottom: 4px; }} .section-title {{ font-size: 16px; font-weight: bold; margin-bottom: 15px; color: #eee; text-transform: uppercase; letter-spacing: 1px; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }} .footer {{ text-align: center; font-size: 10px; color: #444; margin-top: 40px; }} </style></head><body><div class="main-container"><div class="header"><h1 class="title">QUEZHIFENG QUANT</h1><div class="subtitle">MAGPIE SENSES THE WIND | V15.15 FULL CONTEXT</div></div><div class="radar-panel"><div class="radar-title">📡 7x24 GLOBAL LIVE WIRE</div>{news_html}</div><div class="cio-section"><div class="section-title">🛑 CIO 战略审计</div>{cio_html}</div><div class="advisor-section"><div class="section-title" style="color: #ffd700;">🐦 鹊知风·场外实战复盘</div>{advisor_html}</div>{rows}<div class="footer">EST. 2026 | POWERED BY AKSHARE & EM | V15.15</div></div></body></html>"""
 
 def process_single_fund(fund, config, fetcher, tracker, val_engine, analyst, market_context, base_amt, max_daily):
@@ -314,10 +298,14 @@ def main():
     
     all_news_seen = []
     if market_context and market_context != "今日暂无重大新闻。":
-        for line in market_context.split('\n')[:20]: 
+        for line in market_context.split('\n')[:20]: # 限制读取上下文的前20条用于展示，虽然AI看了更多
             try:
+                # [UI 还原] 解析 [时间] 标题 格式
                 parts = line.split('] ', 1)
-                all_news_seen.append(line)
+                if len(parts) == 2:
+                    all_news_seen.append({"time": parts[0][1:], "title": parts[1]})
+                else:
+                    all_news_seen.append({"title": line, "time": ""})
             except Exception:
                 pass
 
