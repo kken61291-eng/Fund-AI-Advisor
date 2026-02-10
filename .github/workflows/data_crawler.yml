@@ -1,22 +1,15 @@
-name: Daily AI Fund Advisor (Analysis)
+name: Daily Data Crawler
 
 on:
   schedule:
-    # [关键修改] 改为每小时第 15 分钟运行
-    # 确保在 Data Crawler (第0分钟运行) 完成数据更新后执行
-    - cron: '15 * * * *'
+    # 每小时第 0 分钟运行 (抓取数据)
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:
-  analyze_and_report:
+  fetch_data:
     runs-on: ubuntu-latest
     env:
-      # 配置您的环境变量 (GitHub Secrets)
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
-      EMAIL_USER: ${{ secrets.EMAIL_USER }}
-      EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-      EMAIL_TO: ${{ secrets.EMAIL_TO }}
       TZ: Asia/Shanghai
 
     steps:
@@ -33,27 +26,25 @@ jobs:
       run: |
         pip install --upgrade pip
         pip install -r requirements.txt
-        # [关键忽略点修复] 必须在这里也强制升级 akshare
-        # 否则 main.py 里的 NewsAnalyst 会因为版本过旧抓不到 7x24 电报
+        # [关键] 强制升级 akshare 到最新版，防止 7x24 接口失效
         pip install --upgrade akshare
 
-    - name: 📥 Pull latest data
+    - name: 🕷️ Run News Crawler
+      run: |
+        python news_loader.py
+
+    - name: 💾 Commit and Push Data
       run: |
         git config --global user.name "GitHub Action"
         git config --global user.email "action@github.com"
-        git pull origin main || echo "No new data to pull"
-
-    - name: 🚀 Run AI Analysis (Main)
-      run: |
-        python main.py
-
-    - name: 📈 Auto-update portfolio ledger
-      run: |
-        # 如果 main.py 更新了 ledger.csv (交易记录)，需要提交保存
-        if [[ -n $(git status --porcelain data_user/ledger.csv) ]]; then
-          git add data_user/ledger.csv
-          git commit -m "📈 Auto-update portfolio ledger [skip ci]"
+        
+        # 添加 data_news 目录下的所有变动
+        git add data_news/
+        
+        # 检查是否有文件变化，有则提交，无则跳过
+        if [[ -n $(git status --porcelain data_news/) ]]; then
+          git commit -m "📡 Auto-update news data [skip ci]"
           git push
         else
-          echo "No trade changes."
+          echo "No new data found, skipping commit."
         fi
