@@ -1,19 +1,22 @@
-name: Data Crawler (Batch Updater)
+name: Daily AI Fund Advisor (Analysis)
 
 on:
   schedule:
-    # [核心修改] 每小时执行一次 (0分时刻)，覆盖全球市场(美股/港股/期货)交易时段
-    - cron: '0 * * * *'
+    # [关键修改] 改为每小时第 15 分钟运行
+    # 确保在 Data Crawler (第0分钟运行) 完成数据更新后执行
+    - cron: '15 * * * *'
   workflow_dispatch:
 
-concurrency: 
-  group: data-crawler
-  cancel-in-progress: false
-
 jobs:
-  update_data:
+  analyze_and_report:
     runs-on: ubuntu-latest
     env:
+      # 配置您的环境变量 (GitHub Secrets)
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+      EMAIL_USER: ${{ secrets.EMAIL_USER }}
+      EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+      EMAIL_TO: ${{ secrets.EMAIL_TO }}
       TZ: Asia/Shanghai
 
     steps:
@@ -30,32 +33,27 @@ jobs:
       run: |
         pip install --upgrade pip
         pip install -r requirements.txt
-        # [关键] 强制升级 akshare 到最新版，防止接口失效
+        # [关键忽略点修复] 必须在这里也强制升级 akshare
+        # 否则 main.py 里的 NewsAnalyst 会因为版本过旧抓不到 7x24 电报
         pip install --upgrade akshare
 
-    - name: 🕷️ Run Market Data Crawler
-      env:
-        # 如果爬虫需要 Tushare，请保留这个
-        TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-      run: |
-        python batch_updater.py
-
-    - name: 📡 Run News Crawler
-      run: |
-        python news_loader.py
-
-    - name: Commit and Push Data
+    - name: 📥 Pull latest data
       run: |
         git config --global user.name "GitHub Action"
         git config --global user.email "action@github.com"
-        
-        # 检查 data_cache (行情) 和 data_news (新闻) 是否有变化
-        if [[ -n $(git status --porcelain data_cache/ data_news/) ]]; then
-          git add data_cache/*.csv
-          git add data_news/*.jsonl
-          git commit -m "💾 Auto-save market & news data [skip ci]"
-          git pull --rebase origin main
+        git pull origin main || echo "No new data to pull"
+
+    - name: 🚀 Run AI Analysis (Main)
+      run: |
+        python main.py
+
+    - name: 📈 Auto-update portfolio ledger
+      run: |
+        # 如果 main.py 更新了 ledger.csv (交易记录)，需要提交保存
+        if [[ -n $(git status --porcelain data_user/ledger.csv) ]]; then
+          git add data_user/ledger.csv
+          git commit -m "📈 Auto-update portfolio ledger [skip ci]"
           git push
         else
-          echo "No new data fetched."
+          echo "No trade changes."
         fi
