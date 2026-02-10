@@ -87,13 +87,14 @@ def calculate_position_v13(tech, ai_adj, ai_decision, val_mult, val_desc, base_a
         if final_mult > 0:
             final_mult = 0
             reasons.append(f"🛡️风控:否决买入")
+            logger.info(f"🚫 [风控拦截 {fund_name}] 触发: {tech.get('tech_cro_comment')}")
     
-    # 7. 锁仓
+    # 7. 锁仓规则
     held_days = pos.get('held_days', 999)
     if final_mult < 0 and pos['shares'] > 0 and held_days < 7:
         final_mult = 0; reasons.append(f"规则:锁仓({held_days}天)")
 
-    # 8. 金额计算
+    # 8. 计算最终金额
     final_amt = 0; is_sell = False; sell_val = 0; label = "观望"
     if final_mult > 0:
         amt = int(base_amt * final_mult)
@@ -201,137 +202,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
         except Exception as e:
             logger.error(f"Render Error {r.get('name')}: {e}")
             
+    # [UI 还原] 恢复 "QUEZHIFENG QUANT" 和 "MAGPIE SENSES THE WIND"
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {{ background: #0a0a0a; color: #f0e6d2; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; max-width: 660px; margin: 0 auto; padding: 20px; }} .main-container {{ border: 2px solid #333; border-top: 5px solid #ffb74d; border-radius: 4px; padding: 20px; background: linear-gradient(180deg, #1b1b1b 0%, #000000 100%); }} .header {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 25px; }} .title {{ color: #ffb74d; margin: 0; font-size: 32px; font-weight: 800; font-family: 'Times New Roman', serif; letter-spacing: 2px; }} .subtitle {{ font-size: 11px; color: #888; margin-top: 8px; text-transform: uppercase; }} .radar-panel {{ background: #111; border: 1px solid #333; border-radius: 4px; padding: 15px; margin-bottom: 25px; }} .radar-title {{ font-size: 14px; color: #ffb74d; font-weight: bold; margin-bottom: 12px; border-bottom: 1px solid #444; padding-bottom: 6px; letter-spacing: 1px; }} .cio-section {{ background: linear-gradient(145deg, #1a0505, #2b0b0b); border: 1px solid #5c1818; border-left: 4px solid #d32f2f; padding: 20px; margin-bottom: 20px; border-radius: 2px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }} .cio-section * {{ color: #ffffff !important; line-height: 1.6; }} .cio-section h3 {{ border-bottom: 1px dashed #5c1818; padding-bottom: 5px; margin-top: 15px; margin-bottom: 8px; display: block; width: 100%; }} .advisor-section {{ background: #0f0f0f; border: 1px solid #d4af37; border-left: 4px solid #ffd700; padding: 20px; margin-bottom: 30px; border-radius: 4px; box-shadow: 0 0 10px rgba(212, 175, 55, 0.2); position: relative; }} .advisor-section * {{ color: #ffffff !important; line-height: 1.6; font-family: 'Georgia', serif; }} .advisor-section h4 {{ color: #ffd700 !important; margin-top: 15px; margin-bottom: 8px; border-bottom: 1px dashed #333; padding-bottom: 4px; }} .section-title {{ font-size: 16px; font-weight: bold; margin-bottom: 15px; color: #eee; text-transform: uppercase; letter-spacing: 1px; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }} .footer {{ text-align: center; font-size: 10px; color: #444; margin-top: 40px; }} </style></head><body><div class="main-container"><div class="header"><h1 class="title">QUEZHIFENG QUANT</h1><div class="subtitle">MAGPIE SENSES THE WIND | V15.15 FULL CONTEXT</div></div><div class="radar-panel"><div class="radar-title">📡 7x24 GLOBAL LIVE WIRE</div>{news_html}</div><div class="cio-section"><div class="section-title">🛑 CIO 战略审计</div>{cio_html}</div><div class="advisor-section"><div class="section-title" style="color: #ffd700;">🐦 鹊知风·场外实战复盘</div>{advisor_html}</div>{rows}<div class="footer">EST. 2026 | POWERED BY AKSHARE & EM | V15.15</div></div></body></html>"""
-
-def process_single_fund(fund, config, fetcher, tracker, val_engine, analyst, market_context, base_amt, max_daily):
-    res = None
-    cio_log = ""
-    used_news = []
-    
-    try:
-        logger.info(f"Analyzing {fund['name']}...")
-        
-        # 1. 读本地数据
-        data = fetcher.get_fund_history(fund['code'])
-        if data is None or data.empty: 
-            return None, "", []
-
-        # 2. 技术指标
-        tech = TechnicalAnalyzer.calculate_indicators(data)
-        if not tech: return None, "", []
-        
-        # 3. 估值
-        try:
-            val_mult, val_desc = val_engine.get_valuation_status(fund.get('index_name'), fund.get('strategy_type'))
-        except:
-            val_mult, val_desc = 1.0, "估值异常"
-
-        with tracker_lock: pos = tracker.get_position(fund['code'])
-
-        # 4. AI 分析
-        ai_adj = 0; ai_res = {}
-        should_run_ai = True
-
-        if analyst and should_run_ai:
-            cro_signal = tech.get('tech_cro_signal', 'PASS')
-            fuse_level = 3 if cro_signal == 'VETO' else (1 if cro_signal == 'WARN' else 0)
-            
-            risk_payload = {
-                "fuse_level": fuse_level,
-                "risk_msg": tech.get('tech_cro_comment', '常规监控')
-            }
-            
-            try:
-                ai_res = analyst.analyze_fund_v5(fund['name'], tech, None, market_context, risk_payload, fund.get('strategy_type', 'core'))
-                ai_adj = ai_res.get('adjustment', 0)
-            except Exception as e:
-                logger.error(f"AI Analysis Failed: {e}")
-                ai_res = {"bull_view": "Error", "bear_view": "Error", "comment": "Offline", "adjustment": 0}
-
-        # 5. [关键] 提取 AI 决策并传递给算分函数
-        ai_decision = ai_res.get('decision', 'PASS') 
-        
-        amt, lbl, is_sell, s_val = calculate_position_v13(
-            tech, ai_adj, ai_decision, val_mult, val_desc, base_amt, max_daily, pos, fund.get('strategy_type'), fund['name']
-        )
-        
-        # 6. 记账
-        with tracker_lock:
-            tracker.record_signal(fund['code'], lbl)
-            if amt > 0: tracker.add_trade(fund['code'], fund['name'], amt, tech['price'])
-            elif is_sell: tracker.add_trade(fund['code'], fund['name'], s_val, tech['price'], True)
-
-        bull = ai_res.get('bull_view') or ai_res.get('bull_say', '无')
-        bear = ai_res.get('bear_view') or ai_res.get('bear_say', '无')
-        if bull != '无':
-            logger.info(f"🗣️ [投委会 {fund['name']}] CGO:{bull[:20]}... | CRO:{bear[:20]}...")
-
-        res = {
-            "name": fund['name'], "code": fund['code'], 
-            "amount": amt, "sell_value": s_val, "position_type": lbl, "is_sell": is_sell, 
-            "tech": tech, "ai_analysis": ai_res, "history": tracker.get_signal_history(fund['code']),
-            "pos_cost": pos.get('cost', 0), "pos_shares": pos.get('shares', 0)
-        }
-    except Exception as e:
-        logger.error(f"Process Error {fund['name']}: {e}")
-        return None, "", []
-    return res, cio_log, used_news
-
-def main():
-    config = load_config()
-    fetcher = DataFetcher()
-    tracker = PortfolioTracker()
-    val_engine = ValuationEngine()
-    
-    logger.info(f">>> [V15.15] Startup | LOCAL_MODE=True | News Source: Local Cache + Live Patch")
-    tracker.confirm_trades()
-    try:
-        analyst = NewsAnalyst()
-    except Exception:
-        analyst = None
-
-    logger.info("📖 正在构建全天候舆情上下文 (Local + Live)...")
-    market_context = analyst.get_market_context() if analyst else "无新闻数据"
-    logger.info(f"🌍 舆情上下文长度: {len(market_context)} 字符")
-    
-    all_news_seen = []
-    if market_context and market_context != "今日暂无重大新闻。":
-        for line in market_context.split('\n'):
-            try:
-                # [关键过滤逻辑]
-                # news_analyst 返回的格式：[时间] 标题 \n (摘要: 内容...)
-                # 我们只取以 [ 开头的行 (标题行)，自动忽略摘要行
-                if line.strip().startswith('['):
-                    all_news_seen.append(line.strip())
-            except Exception:
-                pass
-
-    results = []; cio_lines = [f"【宏观环境】: (见独立审计报告)\n"]
-    
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_fund = {executor.submit(
-            process_single_fund, 
-            fund, config, fetcher, tracker, val_engine, analyst, market_context, 
-            config['global']['base_invest_amount'], config['global']['max_daily_invest']
-        ): fund for fund in config.get('funds', [])}
-        
-        for future in as_completed(future_to_fund):
-            try:
-                res, log, _ = future.result()
-                if res: 
-                    results.append(res)
-                    cio_lines.append(log)
-            except Exception as e: logger.error(f"Thread Error: {e}")
-
-    if results:
-        results.sort(key=lambda x: -x['tech'].get('final_score', 0))
-        full_report = "\n".join(cio_lines)
-        
-        cio_html = analyst.review_report(full_report, market_context) if analyst else "<p>CIO Missing</p>"
-        advisor_html = analyst.advisor_review(full_report, market_context) if analyst else "<p>Advisor Offline</p>"
-        
-        html = render_html_report_v13(all_news_seen, results, cio_html, advisor_html) 
-        
-        send_email("🐦 鹊知风 V15.15 铁拳决议 (Full Context)", html, attachment_path=LOG_FILENAME)
 
 if __name__ == "__main__": main()
