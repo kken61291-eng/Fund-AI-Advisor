@@ -224,6 +224,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
         except Exception as e:
             logger.error(f"Render Error {r.get('name')}: {e}")
     
+    # [Logo] 使用 GitHub Raw 链接
     logo_url = "https://raw.githubusercontent.com/kken61291-eng/Fund-AI-Advisor/main/logo.png"
     
     # [V15.17] CSS 全局优化：深色系 + 琥珀金
@@ -315,6 +316,10 @@ def process_single_fund(fund, config, fetcher, tracker, val_engine, analyst, mar
         if bull != '无':
             logger.info(f"🗣️ [投委会 {fund['name']}] CGO:{bull[:20]}... | CRO:{bear[:20]}...")
 
+        # [V15.17] 修复CIO日志记录逻辑，确保CIO能看到决策理由
+        reason_str = ",".join(tech.get('quant_reasons', []))
+        cio_log = f"标的:{fund['name']} | 决策:{lbl} (分:{tech['final_score']} AI:{ai_adj}) | 理由:{reason_str}"
+
         res = {
             "name": fund['name'], "code": fund['code'], 
             "amount": amt, "sell_value": s_val, "position_type": lbl, "is_sell": is_sell, 
@@ -347,6 +352,7 @@ def main():
     if market_context and market_context != "今日暂无重大新闻。":
         for line in market_context.split('\n'):
             try:
+                # [UI] 过滤掉摘要行，只保留标题供列表展示
                 if line.strip().startswith('['):
                     all_news_seen.append(line.strip())
             except Exception:
