@@ -37,20 +37,51 @@ class NewsAnalyst:
             return {}
 
     def _fetch_live_patch(self):
+        """获取实时新闻补丁"""
         try:
             time.sleep(1)
             df = ak.stock_news_em(symbol="要闻")
             news = []
             for i in range(min(5, len(df))):
                 title = str(df.iloc[i].get('新闻标题') or df.iloc[i].get('title'))
+                # 尝试获取内容，如果实时接口有的话
+                content = str(df.iloc[i].get('新闻内容') or df.iloc[i].get('content') or "")
                 t = str(df.iloc[i].get('发布时间') or df.iloc[i].get('public_time'))
                 if len(t) > 10: t = t[5:16] 
-                news.append(f"[{t}] {title} (Live)")
+                
+                # 实时新闻也做一次过滤
+                if self._is_valid_news(title):
+                    item_str = f"[{t}] {title} (Live)"
+                    if len(content) > 10: # 如果有实质内容，补充进去
+                        item_str += f"\n   摘要: {content[:100]}..."
+                    news.append(item_str)
             return news
         except:
             return []
 
-    def get_market_context(self, max_length=20000):
+    def _is_valid_news(self, title):
+        """
+        [关键逻辑] 噪音过滤器
+        过滤掉没有实质信息的'目录型'或'汇总型'新闻
+        """
+        bad_keywords = [
+            "晚间要闻", "要闻集锦", "晚市要闻", "周前瞻", "周回顾", 
+            "早间要闻", "新闻联播", "要闻速递", "重要公告", "盘前必读",
+            "涨停板复盘", "龙虎榜", "互动平台", "融资融券"
+        ]
+        
+        # 1. 检查垃圾关键词
+        for kw in bad_keywords:
+            if kw in title:
+                return False
+        
+        # 2. 检查标题过短（通常是无意义的短语）
+        if len(title) < 5:
+            return False
+            
+        return True
+
+    def get_market_context(self, max_length=25000): # 增加长度限制，容纳更多内容
         news_lines = []
         today_str = get_beijing_time().strftime("%Y-%m-%d")
         file_path = f"data_news/news_{today_str}.jsonl"
@@ -61,9 +92,26 @@ class NewsAnalyst:
                     for line in f:
                         try:
                             item = json.loads(line)
+                            title = str(item.get('title', ''))
+                            
+                            # [关键] 只有通过过滤的新闻才会被采纳
+                            if not self._is_valid_news(title):
+                                continue
+                                
                             t_str = str(item.get('time', ''))
                             if len(t_str) > 10: t_str = t_str[5:16]
-                            news_lines.append(f"[{t_str}] {item.get('title')}")
+                            
+                            # [关键] 尝试读取正文内容 (content)
+                            # 如果爬虫存了 content，这里就会利用起来！
+                            content = str(item.get('content') or item.get('digest') or "")
+                            
+                            # 格式化：如果有内容，限制长度，避免单条新闻占满屏幕
+                            if len(content) > 50: 
+                                news_entry = f"[{t_str}] {title}\n   >>> 内容: {content[:200]}..." 
+                            else:
+                                news_entry = f"[{t_str}] {title}"
+                                
+                            news_lines.append(news_entry)
                         except: pass
             except Exception as e:
                 logger.error(f"读取新闻缓存失败: {e}")
@@ -74,13 +122,17 @@ class NewsAnalyst:
             
         unique_news = []
         seen = set()
+        # 倒序排列：最新的在前面
         for n in reversed(news_lines):
-            if n not in seen:
-                seen.add(n)
+            # 简单去重：只看标题部分（避免时间戳微小差异导致重复）
+            title_part = n.split('\n')[0] 
+            if title_part not in seen:
+                seen.add(title_part)
                 unique_news.append(n)
         
-        final_text = "\n".join(unique_news)
+        final_text = "\n\n".join(unique_news)
         
+        # 智能截断：保留最新、最有价值的 2.5万字
         if len(final_text) > max_length:
             return final_text[:max_length] + "\n...(早期消息已截断)"
         
@@ -138,8 +190,8 @@ class NewsAnalyst:
         (请务必优先遵守以下经验，甚至可以覆盖技术指标的结论！)
         {expert_rules}
         
-        【舆情因子】
-        {str(news)[:15000]}
+        【舆情因子 (已去噪+内容增强)】
+        {str(news)[:20000]} 
 
         【角色指令】
         **CGO (进攻)**: 引用经验库中的进攻逻辑。若经验库提示"忽略超买/忽略缩量"，则必须执行，寻找做多理由。
