@@ -46,11 +46,11 @@ def clean_time_str(t_str):
         return str(t_str)
 
 # ==========================================
-# 1. 东财抓取 (双保险模式)
+# 1. 东财抓取 (双保险模式 - 修复解析)
 # ==========================================
 def fetch_eastmoney_direct():
     """
-    [Plan B] 不依赖 akshare，直接请求东财接口
+    [Plan B] 直连东财接口，使用字符串截取法解析
     """
     items = []
     try:
@@ -58,38 +58,49 @@ def fetch_eastmoney_direct():
         # 东财 7x24 快讯接口
         url = "https://newsapi.eastmoney.com/kuaixun/v1/getlist_102_ajaxResult_50_1_.html"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://kuaixun.eastmoney.com/"
         }
-        resp = requests.get(url, headers=headers, timeout=10)
+        # 增加超时时间
+        resp = requests.get(url, headers=headers, timeout=15)
         
         if resp.status_code == 200:
             text = resp.text
-            # 接口返回的是 var ajaxResult = { ... }; 格式，需要提取 JSON
-            match = re.search(r'var ajaxResult\s*=\s*({.*});', text, re.DOTALL)
-            if match:
-                json_str = match.group(1)
-                data = json.loads(json_str)
-                news_list = data.get('LivesList', [])
+            
+            # [核心修复] 不用正则，直接暴力截取第一个 { 和最后一个 } 之间的内容
+            # 这能解决 var ajaxResult = ... 格式变化导致的问题
+            try:
+                start_idx = text.find('{')
+                end_idx = text.rfind('}')
                 
-                for news in news_list:
-                    title = news.get('title', '').strip()
-                    digest = news.get('digest', '').strip()
-                    show_time = news.get('showtime', '') # 格式通常为 2026-02-10 12:00:00
+                if start_idx != -1 and end_idx != -1:
+                    json_str = text[start_idx : end_idx + 1]
+                    data = json.loads(json_str)
+                    news_list = data.get('LivesList', [])
                     
-                    # 内容处理
-                    content = digest if len(digest) > len(title) else title
-                    
-                    if not title: continue
-                    
-                    items.append({
-                        "time": show_time,
-                        "title": title,
-                        "content": content,
-                        "source": "EastMoney"
-                    })
-                print(f"   - [Plan B] 成功获取 {len(items)} 条数据")
-            else:
-                print("   - [Plan B] 数据解析失败")
+                    for news in news_list:
+                        title = news.get('title', '').strip()
+                        digest = news.get('digest', '').strip()
+                        show_time = news.get('showtime', '') 
+                        
+                        # 内容处理
+                        content = digest if len(digest) > len(title) else title
+                        
+                        if not title: continue
+                        
+                        items.append({
+                            "time": show_time,
+                            "title": title,
+                            "content": content,
+                            "source": "EastMoney"
+                        })
+                    print(f"   - [Plan B] 成功解析并获取 {len(items)} 条数据")
+                else:
+                    print("   - [Plan B] 未找到 JSON 结构 ({} 不匹配)")
+            except Exception as parse_e:
+                print(f"   - [Plan B] JSON 解析异常: {parse_e}")
+                # 打印一点点内容方便调试
+                print(f"   - [Debug] 返回内容前50字符: {text[:50]}")
         else:
             print(f"   - [Plan B] HTTP请求失败: {resp.status_code}")
             
@@ -121,9 +132,9 @@ def fetch_eastmoney():
     except AttributeError:
         print("   ⚠️ Akshare 版本不兼容 (AttributeError)，切换至 Plan B...")
     except Exception as e:
-        print(f"   ⚠️ Akshare 调用出错: {e}，切换至 Plan B...")
+        print(f"   ⚠️ Akshare 调用出错，切换至 Plan B...")
 
-    # --- 失败则执行 Plan B: Direct API ---
+    # --- 失败则执行 Plan B ---
     return fetch_eastmoney_direct()
 
 # ==========================================
@@ -151,7 +162,7 @@ def fetch_cls_selenium():
         
         # 等待加载
         try:
-            WebDriverWait(driver, 15).until(
+            WebDriverWait(driver, 20).until(
                 EC.presence_of_element_located((By.CLASS_NAME, "telegraph-list"))
             )
         except:
