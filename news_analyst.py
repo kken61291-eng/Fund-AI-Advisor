@@ -12,15 +12,29 @@ class NewsAnalyst:
     def __init__(self):
         self.api_key = os.getenv("LLM_API_KEY")
         self.base_url = os.getenv("LLM_BASE_URL")
-        # 战术执行 (快思考): V3.2 - 负责 CGO/CRO/CIO 实时信号 (低延迟，结构化强)
+        # 战术执行 (快思考): V3.2 - 负责 CGO/CRO/CIO 实时信号
         self.model_tactical = "Pro/deepseek-ai/DeepSeek-V3.2"      
-        # 战略推理 (慢思考): R1 - 负责 宏观策略/复盘审计 (深度归因，非线性推理)
+        # 战略推理 (慢思考): R1 - 负责 宏观策略/复盘审计
         self.model_strategic = "Pro/deepseek-ai/DeepSeek-R1"  
 
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
+        
+        # [RAG] 加载板块实战经验库
+        self.knowledge_base = self._load_knowledge_base()
+
+    def _load_knowledge_base(self):
+        """加载 JSON 经验库，若不存在则返回空"""
+        try:
+            if os.path.exists('knowledge_base.json'):
+                with open('knowledge_base.json', 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return {}
+        except Exception as e:
+            logger.warning(f"⚠️ 无法加载经验库: {e}")
+            return {}
 
     def _fetch_live_patch(self):
         try:
@@ -88,11 +102,16 @@ class NewsAnalyst:
         return text
 
     @retry(retries=1, delay=2)
-    def analyze_fund_v5(self, fund_name, tech, macro, news, risk):
+    def analyze_fund_v5(self, fund_name, tech, macro, news, risk, strategy_type="core"):
         """
-        [战术层] 联邦投委会辩论系统 (V3.2) - 机构级对抗版 (Ultimate)
+        [战术层] 联邦投委会辩论系统 (V3.2) - RAG 增强版
         """
-        # 数据解构与预计算 (数据锚定)
+        # 1. 检索 RAG 经验
+        kb_data = self.knowledge_base.get(strategy_type, {})
+        expert_rules = "\n".join([f"- {r}" for r in kb_data.get('rules', [])])
+        if not expert_rules: expert_rules = "- 无特殊经验，按常规逻辑分析。"
+
+        # 2. 数据解构
         fuse_level = risk['fuse_level']
         fuse_msg = risk['risk_msg']
         trend_score = tech.get('quant_score', 50)
@@ -102,64 +121,56 @@ class NewsAnalyst:
         macd_hist = macd.get('hist', 0)
         vol_ratio = tech.get('risk_factors', {}).get('vol_ratio', 1.0)
         
-        # [关键] 计算量化阈值，强制模型引用
         rsi_zone = "超买(>70)" if rsi > 70 else "超卖(<30)" if rsi < 30 else "中性(30-70)"
         vol_signal = "放量(>1.2)" if vol_ratio > 1.2 else "缩量(<0.8)" if vol_ratio < 0.8 else "常态(0.8-1.2)"
         fuse_veto = "TRUE" if fuse_level >= 2 else "FALSE"
 
+        # [修改点] Prompt 品牌名称替换为 "鹊知风"
         prompt = f"""
-        【系统架构】玄铁量化投委会 | 零和博弈机制
+        【系统架构】鹊知风投委会 | RAG增强模式
         
-        【市场数据】
-        标的: {fund_name}
-        趋势强度: {trend_score}/100 | RSI: {rsi}({rsi_zone}) | MACD: {macd_trend}(Hist:{macd_hist}) | VR: {vol_ratio}({vol_signal})
-        熔断状态: Level{fuse_level} | 硬约束: {fuse_msg} | VETO触发: {fuse_veto}
+        【标的信息】
+        标的: {fund_name} (策略类型: {strategy_type})
+        趋势强度: {trend_score}/100 | RSI: {rsi}({rsi_zone}) | MACD: {macd_trend} | VR: {vol_ratio}({vol_signal})
+        熔断状态: Level{fuse_level} | 硬约束: {fuse_msg}
+        
+        【💀 鹊知风实战经验库 (RAG Knowledge)】
+        (请务必优先遵守以下经验，甚至可以覆盖技术指标的结论！)
+        {expert_rules}
         
         【舆情因子】
         {str(news)[:15000]}
 
-        【对抗机制-必须遵守】
-        1. CGO与CRO立场必须对立，禁止达成共识。
-        2. 若 VETO触发=TRUE，CRO必须无条件否决，CGO必须承认失败。
-        3. CIO裁决必须明确：EXECUTE(执行)/REJECT(否决)/HOLD(观望)，禁止模糊表述。
-        
         【角色指令】
+        **CGO (进攻)**: 引用经验库中的进攻逻辑。若经验库提示"忽略超买/忽略缩量"，则必须执行，寻找做多理由。
+        **CRO (防守)**: 引用经验库中的防守逻辑。若经验库提示"忽略拥挤度"，则不要用拥挤度作为反对理由。
+        **CIO (裁决)**: 
+        - 你的最高指令是"知行合一"。
+        - 如果技术指标显示卖出，但【经验库】提示这是"假摔/洗盘"，请裁决 HOLD 或 EXECUTE。
+        - 如果是跨境ETF (纳指/日经)，严禁使用"缩量/VR低"作为拒绝理由 (根据经验库)。
         
-        **CGO (动量策略师)** - 进攻方
-        - 任务: 寻找做多信号。必须引用具体数据锚点 (如"趋势>60", "VR>1.2")。
-        - 纪律: 若趋势<50，必须承认"无势可借"。
+        【决策矩阵】
+        - EXECUTE: 趋势强且符合经验库逻辑。
+        - REJECT: 触发硬性熔断，或逻辑完全破位。
+        - HOLD: 其他情况。
 
-        **CRO (风控官)** - 防守方  
-        - 任务: 执行压力测试。必须引用具体数据锚点 (如"RSI超买", "熔断Level").
-        - 纪律: 若 fuse_level>=2，无需讨论其他，直接否决。
-
-        **CIO (投资总监)** - 裁决者
-        - 决策矩阵:
-          - EXECUTE: 仅当 趋势>=60 AND RSI中性 AND VR>1.0 AND 无熔断。
-          - REJECT: 若 熔断>=2 OR RSI>75 OR 趋势<40。
-          - HOLD: 其他情况。
-        - 仓位指令:
-          - 强信号(趋势>75): 15-20%
-          - 中信号(趋势60-75): 8-12%
-          - 弱信号: 0-5%
-        
-        【输出格式-强制JSON，禁止省略字段】
+        【输出格式-严格JSON】
         {{
-            "bull_view": "CGO观点 (80字): 引用[趋势{trend_score}/RSI{rsi}/VR{vol_ratio}]，阐述进攻逻辑。",
-            "bear_view": "CRO观点 (80字): 引用[熔断{fuse_level}/RSI{rsi_zone}/VR{vol_signal}]，阐述防守逻辑。",
-            "chairman_conclusion": "CIO裁决 (100字): 综合多空，给出 EXECUTE/REJECT/HOLD 指令及具体理由。",
+            "bull_view": "CGO观点 (80字)",
+            "bear_view": "CRO观点 (80字)",
+            "chairman_conclusion": "CIO裁决 (100字): 必须明确引用'经验库'中的规则来支持你的决定。",
             "decision": "EXECUTE|REJECT|HOLD",
-            "position_pct": "具体仓位% (EXECUTE时必填)",
-            "adjustment": 整数数值 (-30 到 +30),
-            "confidence": 0-100整数,
-            "key_risk": "最大单一风险点 (15字)"
+            "position_pct": "具体仓位%",
+            "adjustment": -30到+30,
+            "confidence": 0-100,
+            "key_risk": "风险点"
         }}
         """
         
         payload = {
             "model": self.model_tactical,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.2, # 降低温度，确保纪律执行
+            "temperature": 0.2,
             "max_tokens": 1000,
             "response_format": {"type": "json_object"}
         }
@@ -173,20 +184,16 @@ class NewsAnalyst:
             content = resp.json()['choices'][0]['message']['content']
             result = json.loads(self._clean_json(content))
             
-            # [关键修复] 硬约束验证层 - Code Level Enforcement
-            # 如果触发熔断，不管 AI 说什么，直接强行覆盖结果
+            # 硬约束：代码层强制执行熔断
             if fuse_level >= 2:
                 result['decision'] = 'REJECT'
                 result['adjustment'] = -30
                 result['position_pct'] = '0%'
-                result['chairman_conclusion'] = f'[系统熔断] 熔断等级{fuse_level}触发，系统强制否决交易。AI原话: {result.get("chairman_conclusion", "")}'
+                result['chairman_conclusion'] = f'[系统熔断] 熔断等级{fuse_level}触发。AI原话: {result.get("chairman_conclusion", "")}'
                 result['confidence'] = 100
-                logger.warning(f"🛡️ [硬约束触发] {fund_name} 熔断等级{fuse_level} -> 强制 REJECT")
 
-            # 兼容旧版字段
             if "chairman_conclusion" in result and "comment" not in result:
                 result["comment"] = result["chairman_conclusion"]
-                
             return result
         except Exception as e:
             logger.error(f"AI Analysis Failed {fund_name}: {e}")
@@ -195,11 +202,12 @@ class NewsAnalyst:
     @retry(retries=2, delay=5)
     def review_report(self, report_text, macro_str):
         """
-        [战略层] CIO 复盘备忘录 (R1) - 深度归因版
+        [战略层] CIO 复盘备忘录 (R1) - 完整 HTML 版
         """
         current_date = datetime.now().strftime("%Y年%m月%d日")
+        # [修改点] 角色名替换为 "鹊知风CIO"
         prompt = f"""
-        【系统角色】玄铁量化CIO | 机构级复盘备忘录 | 日期: {current_date}
+        【系统角色】鹊知风CIO | 机构级复盘备忘录 | 日期: {current_date}
         
         【输入数据】
         宏观环境: {macro_str[:2000]}
@@ -238,11 +246,12 @@ class NewsAnalyst:
     @retry(retries=2, delay=5)
     def advisor_review(self, report_text, macro_str):
         """
-        [审计层] Red Team 顾问 (R1) - 强制对抗版
+        [审计层] Red Team 顾问 (R1) - 完整 HTML 版
         """
         current_date = datetime.now().strftime("%Y年%m月%d日")
+        # [修改点] 角色名替换为 "鹊知风Red Team"
         prompt = f"""
-        【系统角色】玄铁量化Red Team | 独立审计顾问 | 日期: {current_date}
+        【系统角色】鹊知风Red Team | 独立审计顾问 | 日期: {current_date}
         【任务目标】通过结构化质疑，发现CIO决策中的认知偏差与逻辑漏洞。
         
         【输入数据】
