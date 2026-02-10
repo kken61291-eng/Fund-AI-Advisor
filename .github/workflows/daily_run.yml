@@ -2,13 +2,18 @@ name: Daily AI Fund Advisor (Analysis)
 
 on:
   schedule:
-    # 北京时间 14:00 (UTC 06:00) 执行分析
-    - cron: '0 6 * * 1-5'
+    # 建议修改为：北京时间 16:00 (UTC 08:00)
+    # 确保在 A股收盘(15:00) 且 数据源更新后 执行
+    - cron: '0 8 * * 1-5'
   workflow_dispatch:
 
 concurrency: 
   group: ai-analysis
   cancel-in-progress: true
+
+# [关键修复] 必须添加写入权限，否则最后的 git push 会报错
+permissions:
+  contents: write
 
 jobs:
   analyze_and_report:
@@ -33,19 +38,17 @@ jobs:
 
     - name: 🧠 Run Analysis System
       env:
-        # --- 核心修改：变量映射 ---
-        # 左边是 Python 代码(utils.py)里要求的名字
-        # 右边是你 GitHub 仓库(截图)里的 Secret 名字
+        # 邮箱配置
         EMAIL_USER: ${{ secrets.MAIL_USER }}
         EMAIL_PASS: ${{ secrets.MAIL_PASS }}
-        EMAIL_TO: ${{ secrets.MAIL_USER }}   # 发给自己
+        EMAIL_TO: ${{ secrets.MAIL_USER }}
         
-        # 其他变量
+        # LLM 配置
         LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
         
       run: |
-        # 运行主程序，读取本地数据进行分析
+        # 运行主程序
         python main.py
 
     - name: Commit and Push Portfolio
@@ -53,9 +56,11 @@ jobs:
         git config --global user.name "GitHub Action"
         git config --global user.email "action@github.com"
         
+        # 检查 portfolio.json 是否有变化
         if [[ -n $(git status --porcelain portfolio.json) ]]; then
           git add portfolio.json
           git commit -m "📈 Auto-update portfolio ledger [skip ci]"
+          # 使用 rebase 避免合并冲突
           git pull --rebase origin main
           git push
         else
