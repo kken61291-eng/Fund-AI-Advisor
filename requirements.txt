@@ -12,3 +12,4 @@ lxml
 openpyxl
 jinja2
 ta>=0.10.0
+pytz
