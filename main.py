@@ -192,7 +192,6 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
         except Exception as e:
             logger.error(f"Render Error {r.get('name')}: {e}")
             
-    # [修改点] 标题 "QUEZHIFENG QUANT", 副标题 "MAGPIE SENSES THE WIND"
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {{ background: #0a0a0a; color: #f0e6d2; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; max-width: 660px; margin: 0 auto; padding: 20px; }} .main-container {{ border: 2px solid #333; border-top: 5px solid #ffb74d; border-radius: 4px; padding: 20px; background: linear-gradient(180deg, #1b1b1b 0%, #000000 100%); }} .header {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 25px; }} .title {{ color: #ffb74d; margin: 0; font-size: 32px; font-weight: 800; font-family: 'Times New Roman', serif; letter-spacing: 2px; }} .subtitle {{ font-size: 11px; color: #888; margin-top: 8px; text-transform: uppercase; }} .radar-panel {{ background: #111; border: 1px solid #333; border-radius: 4px; padding: 15px; margin-bottom: 25px; }} .radar-title {{ font-size: 14px; color: #ffb74d; font-weight: bold; margin-bottom: 12px; border-bottom: 1px solid #444; padding-bottom: 6px; letter-spacing: 1px; }} .cio-section {{ background: linear-gradient(145deg, #1a0505, #2b0b0b); border: 1px solid #5c1818; border-left: 4px solid #d32f2f; padding: 20px; margin-bottom: 20px; border-radius: 2px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }} .cio-section * {{ color: #ffffff !important; line-height: 1.6; }} .cio-section h3 {{ border-bottom: 1px dashed #5c1818; padding-bottom: 5px; margin-top: 15px; margin-bottom: 8px; display: block; width: 100%; }} .advisor-section {{ background: #0f0f0f; border: 1px solid #d4af37; border-left: 4px solid #ffd700; padding: 20px; margin-bottom: 30px; border-radius: 4px; box-shadow: 0 0 10px rgba(212, 175, 55, 0.2); position: relative; }} .advisor-section * {{ color: #ffffff !important; line-height: 1.6; font-family: 'Georgia', serif; }} .advisor-section h4 {{ color: #ffd700 !important; margin-top: 15px; margin-bottom: 8px; border-bottom: 1px dashed #333; padding-bottom: 4px; }} .section-title {{ font-size: 16px; font-weight: bold; margin-bottom: 15px; color: #eee; text-transform: uppercase; letter-spacing: 1px; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }} .footer {{ text-align: center; font-size: 10px; color: #444; margin-top: 40px; }} </style></head><body><div class="main-container"><div class="header"><h1 class="title">QUEZHIFENG QUANT</h1><div class="subtitle">MAGPIE SENSES THE WIND | V15.15 FULL CONTEXT</div></div><div class="radar-panel"><div class="radar-title">📡 7x24 GLOBAL LIVE WIRE</div>{news_html}</div><div class="cio-section"><div class="section-title">🛑 CIO 战略审计</div>{cio_html}</div><div class="advisor-section"><div class="section-title" style="color: #ffd700;">🐦 鹊知风·场外实战复盘</div>{advisor_html}</div>{rows}<div class="footer">EST. 2026 | POWERED BY AKSHARE & EM | V15.15</div></div></body></html>"""
 
 def process_single_fund(fund, config, fetcher, tracker, val_engine, analyst, market_context, base_amt, max_daily):
@@ -277,8 +276,10 @@ def main():
     
     logger.info(f">>> [V15.15] Startup | LOCAL_MODE=True | News Source: Local Cache + Live Patch")
     tracker.confirm_trades()
-    try: analyst = NewsAnalyst()
-    except: analyst = None
+    try:
+        analyst = NewsAnalyst()
+    except Exception:
+        analyst = None
 
     logger.info("📖 正在构建全天候舆情上下文 (Local + Live)...")
     market_context = analyst.get_market_context() if analyst else "无新闻数据"
@@ -293,7 +294,8 @@ def main():
                     all_news_seen.append({"time": parts[0][1:], "title": parts[1]})
                 else:
                     all_news_seen.append({"title": line, "time": ""})
-            except: pass
+            except Exception:
+                pass
 
     results = []; cio_lines = [f"【宏观环境】: (见独立审计报告)\n"]
     
@@ -306,3 +308,21 @@ def main():
         
         for future in as_completed(future_to_fund):
             try:
+                res, log, _ = future.result()
+                if res: 
+                    results.append(res)
+                    cio_lines.append(log)
+            except Exception as e: logger.error(f"Thread Error: {e}")
+
+    if results:
+        results.sort(key=lambda x: -x['tech'].get('final_score', 0))
+        full_report = "\n".join(cio_lines)
+        
+        cio_html = analyst.review_report(full_report, market_context) if analyst else "<p>CIO Missing</p>"
+        advisor_html = analyst.advisor_review(full_report, market_context) if analyst else "<p>Advisor Offline</p>"
+        
+        html = render_html_report_v13(all_news_seen, results, cio_html, advisor_html) 
+        
+        send_email("🐦 鹊知风 V15.15 铁拳决议 (Full Context)", html, attachment_path=LOG_FILENAME)
+
+if __name__ == "__main__": main()
