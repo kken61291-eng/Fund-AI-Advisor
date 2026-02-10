@@ -54,8 +54,10 @@ jobs:
         
         # 添加新闻目录
         git add data_news/
-        # 添加行情目录 (data_fetcher.py 默认保存到 data_market)
-        git add data_market/ || true
+        
+        # [关键修正] 必须是 data_cache/，与 data_fetcher.py 中的 DATA_DIR 保持一致！
+        # 原来的 data_market/ 是错误的，会导致数据无法提交
+        git add data_cache/ || true
         
         # 检查变动并提交
         if [[ -n $(git status --porcelain) ]]; then
