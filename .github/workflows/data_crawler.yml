@@ -6,7 +6,7 @@ on:
     - cron: '30 * * * *'
   workflow_dispatch:
 
-# [新增] 必须赋予写入权限，否则最后的 git push 会失败
+# 必须赋予写入权限
 permissions:
   contents: write
 
@@ -19,6 +19,9 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
+      with:
+        # [关键] 获取完整历史，避免 push 冲突
+        fetch-depth: 0
 
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -30,7 +33,7 @@ jobs:
       run: |
         pip install --upgrade pip
         pip install -r requirements.txt
-        # [核心修复] 必须强制升级 akshare 到最新版！
+        # 强制升级 akshare 到最新版
         pip install --upgrade akshare
 
     # ----------------------------------------------------------------
@@ -56,16 +59,28 @@ jobs:
         # 配置 git 用户
         git config --global user.name "GitHub Action"
         git config --global user.email "action@github.com"
-        
+
         # 添加数据目录
         git add data_news/
         git add data_cache/ || true
-        
+
         # 检查是否有变动
         if [[ -n $(git status --porcelain) ]]; then
           echo "检测到数据更新，正在提交..."
           git commit -m "📡 Auto-update News & Market data [skip ci]"
-          git push
+
+          # [关键修复] 先拉取远程更新，避免冲突
+          echo "正在同步远程更改..."
+          git pull origin main --rebase || git pull origin master --rebase || true
+
+          # 推送（带重试机制）
+          for i in 1 2 3; do
+            echo "尝试推送 (第 $i 次)..."
+            git push && break
+            echo "推送失败，等待后重试..."
+            sleep 3
+            git pull --rebase
+          done
         else
           echo "No new data found, skipping commit."
         fi
