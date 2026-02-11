@@ -12,7 +12,7 @@ from valuation_engine import ValuationEngine
 from portfolio_tracker import PortfolioTracker
 from utils import send_email, logger, LOG_FILENAME
 
-# 导入新的 UI 引擎 (注意这里是 v18)
+# 【🔥关键修复】导入新的 V18 渲染引擎
 from ui_renderer import render_html_report_v18
 
 # --- 全局配置 ---
@@ -129,7 +129,7 @@ def process_single_fund(fund, config, fetcher, tracker, val_engine, analyst, mar
         return {
             "name": fund_name, 
             "code": fund_code, 
-            "index_name": fund.get('index_name'), # 确保UI能拿到指数代码
+            "index_name": fund.get('index_name'), 
             "amount": amt, 
             "sell_value": s_val, 
             "is_sell": is_sell, 
@@ -148,7 +148,7 @@ def main():
     try: analyst = NewsAnalyst()
     except: analyst = None
 
-    # 获取市场新闻
+    # 获取市场新闻 (需确保已运行 news_crawler.py)
     market_context = analyst.get_market_context() if analyst else "无数据"
     # 清洗新闻列表用于UI显示
     all_news_seen = [line.strip() for line in market_context.split('\n') if line.strip().startswith('[')]
@@ -181,7 +181,7 @@ def main():
         cio_html = analyst.review_report(full_report, market_context) if analyst else ""
         advisor_html = analyst.advisor_review(full_report, market_context) if analyst else ""
         
-        # 【关键修改】调用 V18 渲染器
+        # 【🔥关键调用】使用新的 V18 渲染器
         html = render_html_report_v18(all_news_seen, results, cio_html, advisor_html) 
         
         subject_prefix = "🚧 [测试] " if TEST_MODE else "🕊️ "
