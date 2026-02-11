@@ -1,280 +1,283 @@
-import requests
-import json
+import yaml
 import os
-import re
-import akshare as ak
-import time
-import random
-import pandas as pd
-from datetime import datetime
-from utils import logger, retry, get_beijing_time
-# 导入 v3.2 配置文件
-from prompts_config import TACTICAL_IC_PROMPT, STRATEGIC_CIO_REPORT_PROMPT, RED_TEAM_AUDIT_PROMPT
+import threading
+import json
+import base64
+import re  # 用于 Markdown 正则清洗
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from data_fetcher import DataFetcher
+from news_analyst import NewsAnalyst
+from technical_analyzer import TechnicalAnalyzer
+from valuation_engine import ValuationEngine
+from portfolio_tracker import PortfolioTracker
+from utils import send_email, logger, LOG_FILENAME
 
-class NewsAnalyst:
-    def __init__(self):
-        self.api_key = os.getenv("LLM_API_KEY")
-        self.base_url = os.getenv("LLM_BASE_URL")
-        # 战术执行 (快思考): V3.2 - 负责 CGO/CRO/CIO 实时信号
-        self.model_tactical = "Pro/deepseek-ai/DeepSeek-V3.2"      
-        # 战略推理 (慢思考): R1 - 负责 宏观复盘/逻辑审计
-        self.model_strategic = "Pro/deepseek-ai/DeepSeek-R1"   
+# --- 全局配置 ---
+DEBUG_MODE = True  
+tracker_lock = threading.Lock()
 
-        self.headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+def load_config():
+    try:
+        with open('config.yaml', 'r', encoding='utf-8') as f:
+            return yaml.safe_load(f)
+    except Exception as e:
+        logger.error(f"配置文件读取失败: {e}")
+        return {"funds": [], "global": {"base_invest_amount": 1000, "max_daily_invest": 5000}}
 
-    def _clean_time(self, t_str):
-        """统一时间格式为 MM-DD HH:MM"""
-        try:
-            if len(str(t_str)) >= 16:
-                return str(t_str)[5:16]
-            return str(t_str)
-        except: return ""
+def clean_markdown(text):
+    """
+    清洗 AI 回复中可能夹带的 Markdown 标记，防止 HTML 渲染异常
+    """
+    if not text:
+        return ""
+    # 1. 移除 ```html, ```json, ``` 等代码块标签
+    text = re.sub(r'```(?:html|json|markdown)?', '', text)
+    # 2. 移除常见的 Markdown 加粗标记
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+    # 3. 移除标题标记 (针对 ### 核心审计发现 -> 核心审计发现)
+    text = re.sub(r'#+\s+', '', text)
+    return text.strip()
 
-    def _fetch_live_patch(self):
-        """[7x24全球财经电报] - 双源抓取 (EastMoney + CLS) - 适配 akshare 新版接口"""
-        news_list = []
-        
-        # 1. 东方财富 (尝试使用新版 Global 接口)
-        try:
-            # 替换旧的 stock_telegraph_em 为 stock_info_global_em 或类似可用接口
-            # 注意：akshare 接口变动频繁，此处增加兼容性处理
-            if hasattr(ak, 'stock_info_global_em'):
-                df_em = ak.stock_info_global_em()
-            else:
-                # 备用：如果 Global 接口不存在，尝试获取 A 股个股新闻作为兜底（或者跳过）
-                logger.warning("akshare.stock_info_global_em 接口未找到，跳过 EM 源")
-                df_em = None
+def calculate_position_v13(tech, ai_adj, ai_decision, val_mult, val_desc, base_amt, max_daily, pos, strategy_type, fund_name):
+    """
+    V13 核心算分逻辑 (保持原样，不作改动)
+    """
+    base_score = tech.get('quant_score', 50)
+    try:
+        ai_adj_int = int(ai_adj)
+    except:
+        ai_adj_int = 0
 
-            if df_em is not None and not df_em.empty:
-                for i in range(min(50, len(df_em))):
-                    title = str(df_em.iloc[i].get('title') or '')
-                    content = str(df_em.iloc[i].get('content') or '')
-                    t = self._clean_time(df_em.iloc[i].get('public_time') or df_em.iloc[i].get('publish_time'))
-                    
-                    if self._is_valid_news(title):
-                        item_str = f"[{t}] [EM] {title}"
-                        if len(content) > 10 and content != title: 
-                            item_str += f"\n   (摘要: {content[:300]})"
-                        news_list.append(item_str)
-        except Exception as e: 
-            logger.warning(f"Live EM fetch error: {e}")
-
-        # 2. 财联社 (替换为 stock_info_global_cls)
-        try:
-            # 替换旧的 stock_telegraph_cls
-            if hasattr(ak, 'stock_info_global_cls'):
-                df_cls = ak.stock_info_global_cls()
-            elif hasattr(ak, 'stock_telegraph_cls'):
-                df_cls = ak.stock_telegraph_cls()
-            else:
-                df_cls = None
-
-            if df_cls is not None and not df_cls.empty:
-                for i in range(min(50, len(df_cls))):
-                    title = str(df_cls.iloc[i].get('title') or '')
-                    content = str(df_cls.iloc[i].get('content') or '')
-                    # CLS 接口时间字段可能是 time 或 publish_time
-                    raw_t = df_cls.iloc[i].get('time') or df_cls.iloc[i].get('publish_time')
-                    
-                    try:
-                        # 处理时间戳或字符串
-                        if str(raw_t).isdigit():
-                            t = datetime.fromtimestamp(int(raw_t)).strftime("%m-%d %H:%M")
-                        else:
-                            t = self._clean_time(raw_t)
-                    except: t = ""
-
-                    if not title and content: title = content[:30] + "..."
-                    
-                    if self._is_valid_news(title):
-                        item_str = f"[{t}] [CLS] {title}"
-                        if len(content) > 10 and content != title: 
-                            item_str += f"\n   (摘要: {content[:300]})"
-                        news_list.append(item_str)
-        except Exception as e: 
-            logger.warning(f"Live CLS fetch error: {e}")
+    tactical_score = max(0, min(100, base_score + ai_adj_int))
+    
+    if ai_decision == "REJECT":
+        tactical_score = 0 
+    elif ai_decision == "HOLD" and tactical_score >= 60:
+        tactical_score = 59
             
-        return news_list
+    tech['final_score'] = tactical_score
+    tech['ai_adjustment'] = ai_adj_int
+    tech['valuation_desc'] = val_desc
+    cro_signal = tech.get('tech_cro_signal', 'PASS')
+    
+    tactical_mult = 0
+    reasons = []
 
-    def _is_valid_news(self, title):
-        return bool(title and len(title) >= 2)
+    if tactical_score >= 85: tactical_mult = 2.0; reasons.append("战术:极强")
+    elif tactical_score >= 70: tactical_mult = 1.0; reasons.append("战术:走强")
+    elif tactical_score >= 60: tactical_mult = 0.5; reasons.append("战术:企稳")
+    elif tactical_score <= 25: tactical_mult = -1.0; reasons.append("战术:破位")
 
-    def get_market_context(self, max_length=35000): 
-        """[核心逻辑] 收集 -> 去重 -> 排序 -> 截断"""
-        news_candidates = []
-        today_str = get_beijing_time().strftime("%Y-%m-%d")
-        file_path = f"data_news/news_{today_str}.jsonl"
+    final_mult = tactical_mult
+    if tactical_mult > 0:
+        if val_mult < 0.5: final_mult = 0; reasons.append(f"战略:高估刹车")
+        elif val_mult > 1.0: final_mult *= val_mult; reasons.append(f"战略:低估加倍")
+    elif tactical_mult < 0:
+        if val_mult > 1.2: final_mult = 0; reasons.append(f"战略:底部锁仓")
+        elif val_mult < 0.8: final_mult *= 1.5; reasons.append("战略:高估止损")
+    else:
+        if val_mult >= 1.5 and strategy_type in ['core', 'dividend']:
+            final_mult = 0.5; reasons.append(f"战略:左侧定投")
+
+    if cro_signal == "VETO" and final_mult > 0:
+        final_mult = 0; reasons.append(f"🛡️风控:否决买入")
+    
+    held_days = pos.get('held_days', 999)
+    if final_mult < 0 and pos['shares'] > 0 and held_days < 7:
+        final_mult = 0; reasons.append(f"规则:锁仓({held_days}天)")
+
+    final_amt = 0; is_sell = False; sell_val = 0; label = "观望"
+    if final_mult > 0:
+        final_amt = max(0, min(int(base_amt * final_mult), int(max_daily)))
+        label = "买入"
+    elif final_mult < 0:
+        is_sell = True
+        sell_val = pos['shares'] * tech.get('price', 0) * min(abs(final_mult), 1.0)
+        label = "卖出"
+
+    if reasons: tech['quant_reasons'] = reasons
+    return final_amt, label, is_sell, sell_val
+
+def render_html_report_v13(all_news, results, cio_html, advisor_html):
+    """
+    生成 HTML 报告 - 适配 v3.2 嵌套字段，修正底色与 Markdown
+    """
+    COLOR_GOLD = "#fab005" 
+    COLOR_RED = "#fa5252"  
+    COLOR_GREEN = "#51cf66" 
+    COLOR_TEXT_MAIN = "#e9ecef"
+    COLOR_TEXT_SUB = "#adb5bd"
+    COLOR_BG_MAIN = "#0f1215" 
+    COLOR_BG_CARD = "#16191d" 
+    
+    # 清洗 R1 生成的 Markdown
+    cio_html = clean_markdown(cio_html)
+    advisor_html = clean_markdown(advisor_html)
+
+    news_html = "".join([f'<div style="font-size:11px;color:{COLOR_TEXT_SUB};margin-bottom:5px;border-bottom:1px solid #25282c;padding-bottom:3px;"><span style="color:{COLOR_GOLD};margin-right:4px;">●</span>{n}</div>' for n in all_news])
+    
+    rows = ""
+    for r in results:
+        tech = r.get('tech', {})
+        ai_data = r.get('ai_analysis', {})
         
-        live_news = self._fetch_live_patch()
-        if live_news: news_candidates.extend(live_news)
-            
-        if os.path.exists(file_path):
+        # v3.2 数据提取
+        bull_say = clean_markdown(ai_data.get('cgo_proposal', {}).get('catalyst', '无明显催化'))
+        bear_say = clean_markdown(ai_data.get('cro_audit', {}).get('max_drawdown_scenario', '无'))
+        chairman = clean_markdown(ai_data.get('chairman_conclusion', '无结论'))
+
+        act_style = f"background:rgba(250,82,82,0.15);color:{COLOR_RED};border:1px solid {COLOR_RED};" if r['amount'] > 0 else (f"background:rgba(81,207,102,0.15);color:{COLOR_GREEN};border:1px solid {COLOR_GREEN};" if r['is_sell'] else "background:rgba(255,255,255,0.05);color:#adb5bd;border:1px solid #495057;")
+        act_text = f"⚡ 买入 {r['amount']:,}" if r['amount'] > 0 else (f"💰 卖出 {int(r['sell_value']):,}" if r['is_sell'] else "☕ 观望")
+
+        reasons = " ".join([f"<span style='border:1px solid #444;background:rgba(255,255,255,0.05);padding:1px 4px;font-size:9px;border-radius:3px;color:{COLOR_TEXT_SUB};margin-right:3px;'>{x}</span>" for x in tech.get('quant_reasons', [])])
+        
+        # --- 适配新的 tech 结构用于显示 ---
+        # 旧版: tech.get('risk_factors', {}).get('vol_ratio')
+        # 新版: tech.get('volume_analysis', {}).get('vol_ratio')
+        vol_ratio = tech.get('volume_analysis', {}).get('vol_ratio', 1.0)
+        
+        rows += f"""<div class="card" style="border-left:3px solid {COLOR_GOLD}; background:{COLOR_BG_CARD}; margin-bottom:15px; padding:15px; border-radius:4px;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:10px;align-items:center;">
+                <span style="font-size:16px;font-weight:bold;color:{COLOR_TEXT_MAIN};">{r['name']}</span>
+                <span style="display:inline-block;padding:3px 10px;font-size:12px;font-weight:bold;border-radius:4px;{act_style}">{act_text}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+                 <span style="color:{COLOR_GOLD};font-weight:bold;font-size:18px;">{tech.get('final_score', 0)}分</span>
+                 <div style="font-size:11px;color:{COLOR_TEXT_SUB};padding-top:4px;">🛡️ {tech.get('tech_cro_comment','-')}</div>
+            </div>
+            <div class="tech-grid">
+                <span>RSI: {tech.get('rsi','-')}</span>
+                <span>阶段: {ai_data.get('trend_analysis', {}).get('stage','-')}</span>
+                <span>VR: {vol_ratio}</span>
+                <span>失效位: {ai_data.get('trend_analysis', {}).get('key_levels', {}).get('invalidation','-')}</span>
+            </div>
+            <div style="margin-top:8px;">{reasons}</div>
+            <div style="margin-top:12px;border-top:1px solid #333;padding-top:10px;">
+                <div style="border-left:2px solid {COLOR_GREEN};background:rgba(81,207,102,0.05);padding:8px;margin-bottom:5px;font-size:11px;">
+                    <div style="color:{COLOR_GREEN};font-weight:bold;margin-bottom:2px;">🦊 CGO</div>
+                    <div style="color:#c0ebc9;">"{bull_say}"</div>
+                </div>
+                <div style="border-left:2px solid {COLOR_RED};background:rgba(250,82,82,0.05);padding:8px;margin-bottom:5px;font-size:11px;">
+                    <div style="color:{COLOR_RED};font-weight:bold;margin-bottom:2px;">🐻 CRO</div>
+                    <div style="color:#ffc9c9;">"{bear_say}"</div>
+                </div>
+                <div style="background:rgba(250,176,5,0.05);padding:10px;border-radius:4px;border:1px solid rgba(250,176,5,0.2);margin-top:8px;">
+                    <div style="color:{COLOR_GOLD};font-size:12px;font-weight:bold;margin-bottom:4px;">⚖️ CIO 终审</div>
+                    <div style="color:{COLOR_TEXT_MAIN};font-size:12px;">{chairman}</div>
+                </div>
+            </div>
+        </div>"""
+
+    # --- Logo 处理 ---
+    logo_src = "https://raw.githubusercontent.com/kken61291-eng/Fund-AI-Advisor/main/logo.png"
+    for p in ["logo.png", "Gemini_Generated_Image_d7oeird7oeird7oe.jpg"]:
+        if os.path.exists(p):
             try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        try:
-                            item = json.loads(line)
-                            title = str(item.get('title', ''))
-                            if not self._is_valid_news(title): continue
-                            t_str, source = self._clean_time(item.get('time', '')), item.get('source', 'Local')
-                            src_tag = "[EM]" if source == "EastMoney" else ("[CLS]" if source == "CLS" else "[Local]")
-                            content = str(item.get('content') or item.get('digest') or "")
-                            news_entry = f"[{t_str}] {src_tag} {title}"
-                            if len(content) > 10: news_entry += f"\n   (摘要: {content[:300]})"
-                            news_candidates.append(news_entry)
-                        except: pass
-            except Exception as e: logger.error(f"读取新闻缓存失败: {e}")
+                with open(p, "rb") as f:
+                    logo_src = f"data:image/{p.split('.')[-1]};base64,{base64.b64encode(f.read()).decode()}"
+                break
+            except: pass
+
+    return f"""<!DOCTYPE html><html><head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {{ background: {COLOR_BG_MAIN}; color: {COLOR_TEXT_MAIN}; font-family: sans-serif; margin: 0; padding: 10px; }}
+        .main-container {{ max-width: 600px; margin: 0 auto; background: #0a0c0e; border: 1px solid #2c3e50; padding: 15px; border-radius: 8px; }}
+        .tech-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 5px; font-size: 11px; color: {COLOR_TEXT_SUB}; }}
+        .cio-content, .advisor-content {{ line-height: 1.6; font-size: 13px; color: {COLOR_TEXT_MAIN} !important; }}
+        /* 强制覆盖 AI 可能生成的任何底色，确保为深色背景 */
+        .cio-content *, .advisor-content * {{ background-color: transparent !important; color: inherit !important; }}
+        @media (max-width: 480px) {{ .tech-grid {{ grid-template-columns: 1fr; }} .main-container {{ padding: 10px; border: none; }} }}
+    </style></head><body>
+    <div class="main-container">
+        <div style="text-align:center; padding-bottom:20px; border-bottom:1px solid #222;">
+            <img src="{logo_src}" style="width:200px; max-width:80%; display:block; margin:0 auto;">
+            <div style="font-size:10px; color:{COLOR_GOLD}; letter-spacing:2px; margin-top:10px;">MAGPIE SENSES THE WIND | V15.20</div>
+        </div>
         
-        unique_news, seen = [], set()
-        for n in news_candidates:
-            title_part = n.split('] ', 2)[-1].split('\n')[0]
-            if title_part not in seen:
-                seen.add(title_part); unique_news.append(n)
+        <div style="background:{COLOR_BG_CARD};margin-top:20px;padding:15px;border-radius:4px;margin-bottom:15px;">
+            <div style="color:{COLOR_GOLD};font-weight:bold;border-bottom:1px solid #333;padding-bottom:5px;margin-bottom:10px;">📡 全球舆情雷达</div>
+            {news_html}
+        </div>
+        <div style="background:{COLOR_BG_CARD};padding:15px;border-radius:4px;border-left:3px solid {COLOR_RED};margin-bottom:15px;">
+            <div style="color:{COLOR_RED};font-weight:bold;margin-bottom:10px;">🛑 CIO 战略审计报告</div>
+            <div class="cio-content">{cio_html}</div>
+        </div>
+        <div style="background:{COLOR_BG_CARD};padding:15px;border-radius:4px;border-left:3px solid {COLOR_GOLD};margin-bottom:15px;">
+            <div style="color:{COLOR_GOLD};font-weight:bold;margin-bottom:10px;">🐦 鹊知风·趋势一致性审计</div>
+            <div class="advisor-content">{advisor_html}</div>
+        </div>
+        {rows}
+        <div style="text-align:center; color:#444; font-size:10px; margin-top:30px;">EST. 2026 | POWERED BY AI</div>
+    </div></body></html>"""
+
+def process_single_fund(fund, config, fetcher, tracker, val_engine, analyst, market_context, base_amt, max_daily):
+    """
+    适配 v3.2 JSON 字段提取 - 并实例化 TechnicalAnalyzer
+    """
+    try:
+        data = fetcher.get_fund_history(fund['code'])
+        if data is None or data.empty: return None, "", []
         
-        try: unique_news.sort(key=lambda x: x[:17], reverse=True)
-        except: pass 
+        # --- 修复点：实例化类后再调用 ---
+        # 你的新版 technical_analyzer.py 移除了静态方法，使用了 __init__
+        # 默认假设为 ETF 类型，如果需要区分股票，可在此处添加逻辑
+        analyzer_instance = TechnicalAnalyzer(asset_type='ETF') 
+        tech = analyzer_instance.calculate_indicators(data)
         
-        final_list, current_len = [], 0
-        for news_item in unique_news:
-            if current_len + len(news_item) < max_length:
-                final_list.append(news_item); current_len += len(news_item) + 1 
-            else: break
+        if not tech: return None, []
         
-        return "\n".join(final_list) if final_list else "今日暂无重大新闻。"
-
-    def _clean_json(self, text):
-        try:
-            text = re.sub(r'```json\s*', '', text)
-            text = re.sub(r'```', '', text)
-            text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-            start, end = text.find('{'), text.rfind('}')
-            if start != -1 and end != -1: text = text[start:end+1]
-            return re.sub(r',\s*([\]}])', r'\1', text)
-        except: return "{}"
-
-    # ============================================
-    # v3.2 逻辑守卫 (Logic Guardian) - 核心后处理校验
-    # ============================================
-    def _apply_logic_guardian(self, res, tech):
-        """强制执行 v3.2 后处理校验规则，修正 AI 幻觉"""
-        try:
-            # 规则 1: 趋势阶段与仓位匹配强制修正
-            stage = res.get('trend_analysis', {}).get('stage', 'UNCLEAR')
-            pos_size_str = str(res.get('position_size', '0%')).replace('%', '')
-            try: pos_size = float(pos_size_str)
-            except: pos_size = 0.0
-
-            # 阈值定义
-            thresholds = {"START": (0, 50), "ACCELERATING": (0, 80), "EXHAUSTION": (0, 20), "REVERSAL": (0, 0)}
-            if stage in thresholds:
-                min_p, max_p = thresholds[stage]
-                if pos_size > max_p:
-                    logger.warning(f"🚨 [逻辑守卫] {stage}阶段仓位{pos_size}%超限，强制修正至{max_p}%")
-                    res['position_size'] = f"{max_p}%"
-                    res['adjustment'] = min(res.get('adjustment', 0), 20) # 限制加仓幅度
-
-            # 规则 2: 背离响应强制化
-            # 适配 V17.0 Tech 结构: tech['macd']['divergence']
-            divergence_type = tech.get('macd', {}).get('divergence', 'NONE')
-            # 也可以检查 AI 分析结果中的背离
-            ai_div = res.get('trend_analysis', {}).get('divergence', {}).get('type', 'NONE')
-            
-            if divergence_type == "TOP_DIVERGENCE" or ai_div == "BEARISH_TOP":
-                if res.get('decision') == "EXECUTE":
-                    logger.warning(f"🚨 [逻辑守卫] 发现顶背离，强制撤销买入指令")
-                    res['decision'] = "HOLD"
-                    res['adjustment'] = min(res.get('adjustment', 0), 0)
-
-            # 规则 3: 乖离率硬闸门
-            bias_alert = res.get('cro_audit', {}).get('bias_alert', False)
-            if bias_alert and res.get('adjustment', 0) > 0:
-                logger.warning(f"🚨 [逻辑守卫] 乖离率过高，禁止加仓")
-                res['adjustment'] = 0
-                res['decision'] = "HOLD"
-
-            # 规则 4: 趋势失效位缺失补全
-            if not res.get('trend_analysis', {}).get('key_levels', {}).get('invalidation'):
-                res['trend_analysis']['key_levels']['invalidation'] = "20日均线破位"
-
-        except Exception as e:
-            logger.error(f"逻辑守卫执行异常: {e}")
-        return res
-
-    @retry(retries=1, delay=2)
-    def analyze_fund_v5(self, fund_name, tech, macro, news, risk, strategy_type="core"):
-        """[战术层] v3.2 生产版调用 - 适配 V17.0 量化数据结构"""
-        fuse_level, fuse_msg = risk['fuse_level'], risk['risk_msg']
-        
-        # --- 适配新版 TechnicalAnalyzer 数据结构 ---
-        # 1. 量能状态
-        vol_info = tech.get('volume_analysis', {})
-        vol_ratio = vol_info.get('vol_ratio', 1.0)
-        vol_status = "放量" if vol_ratio > 1.5 else ("缩量" if vol_ratio < 0.8 else "平量")
-        
-        # 2. 均线状态 (适配 moving_averages 和 key_levels)
-        # 模拟 slope: 简单比较当前价格与均线关系，或使用 slope 字段
-        ma_levels = tech.get('key_levels', {})
-        ma5_val = tech.get('moving_averages', {}).get('EMA5', 0)
-        ma10_val = tech.get('moving_averages', {}).get('EMA10', 0)
-        
-        ma5_status = "向上" if ma5_val > ma10_val else "向下" # 简单替代逻辑
-        ma20_status = "支撑" if ma_levels.get('above_ma20') else "破位"
-        ma60_status = "多头" if ma_levels.get('above_ma60') else "空头"
-
-        prompt = TACTICAL_IC_PROMPT.format(
-            fund_name=fund_name, strategy_type=strategy_type,
-            trend_score=tech.get('quant_score', 50), fuse_level=fuse_level, fuse_msg=fuse_msg,
-            rsi=tech.get('rsi', 50), macd_trend=tech.get('macd', {}).get('trend', '-'),
-            volume_status=vol_status,
-            ma5_status=ma5_status,
-            ma20_status=ma20_status,
-            ma60_status=ma60_status,
-            news_content=str(news)[:25000]
+        val_mult, val_desc = val_engine.get_valuation_status(
+            fund.get('index_name'), 
+            fund.get('strategy_type'), 
+            fund.get('code')  # 传入 fund code 作为兜底数据源
         )
+        with tracker_lock: pos = tracker.get_position(fund['code'])
+
+        ai_res = {}
+        if analyst:
+            cro_signal = tech.get('tech_cro_signal', 'PASS')
+            risk_payload = {"fuse_level": 3 if cro_signal == 'VETO' else 0, "risk_msg": tech.get('tech_cro_comment', '监控')}
+            ai_res = analyst.analyze_fund_v5(fund['name'], tech, None, market_context, risk_payload, fund.get('strategy_type', 'core'))
+
+        ai_adj = ai_res.get('adjustment', 0)
+        ai_decision = ai_res.get('decision', 'PASS') 
         
-        payload = {
-            "model": self.model_tactical, "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1, "max_tokens": 1200, "response_format": {"type": "json_object"}
-        }
+        amt, lbl, is_sell, s_val = calculate_position_v13(tech, ai_adj, ai_decision, val_mult, val_desc, base_amt, max_daily, pos, fund.get('strategy_type'), fund['name'])
         
-        try:
-            resp = requests.post(f"{self.base_url}/chat/completions", headers=self.headers, json=payload, timeout=90)
-            if resp.status_code != 200: return self._get_fallback_result()
-            
-            result = json.loads(self._clean_json(resp.json()['choices'][0]['message']['content']))
-            
-            # 执行逻辑守卫
-            result = self._apply_logic_guardian(result, tech)
+        with tracker_lock:
+            tracker.record_signal(fund['code'], lbl)
+            if amt > 0: tracker.add_trade(fund['code'], fund['name'], amt, tech['price'])
+            elif is_sell: tracker.add_trade(fund['code'], fund['name'], s_val, tech['price'], True)
 
-            # 强制执行熔断逻辑
-            if fuse_level >= 2:
-                result['decision'], result['adjustment'] = 'REJECT', -100
-                result['chairman_conclusion'] = f'[系统熔断] {fuse_msg} - 强制离场。'
+        cio_log = f"标的:{fund['name']} | 阶段:{ai_res.get('trend_analysis',{}).get('stage','-')} | 决策:{lbl}(AI:{ai_adj})"
+        return {"name": fund['name'], "code": fund['code'], "amount": amt, "sell_value": s_val, "is_sell": is_sell, "tech": tech, "ai_analysis": ai_res}, cio_log, []
+    except Exception as e:
+        logger.error(f"Error {fund['name']}: {e}", exc_info=True); return None, "", []
 
-            return result
-        except Exception as e:
-            logger.error(f"AI Analysis Failed {fund_name}: {e}")
-            return self._get_fallback_result()
+def main():
+    config = load_config()
+    fetcher, tracker, val_engine = DataFetcher(), PortfolioTracker(), ValuationEngine()
+    tracker.confirm_trades()
+    try: analyst = NewsAnalyst()
+    except: analyst = None
 
-    def _get_fallback_result(self):
-        return {"decision": "HOLD", "adjustment": 0, "trend_analysis": {"stage": "UNCLEAR"}}
+    market_context = analyst.get_market_context() if analyst else "无数据"
+    all_news_seen = [line.strip() for line in market_context.split('\n') if line.strip().startswith('[')]
 
-    @retry(retries=2, delay=5)
-    def review_report(self, report_text, macro_str):
-        prompt = STRATEGIC_CIO_REPORT_PROMPT.format(current_date=datetime.now().strftime("%Y年%m月%d日"), macro_str=macro_str[:2500], report_text=report_text[:3000])
-        return self._call_r1(prompt)
+    results, cio_lines = [], []
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(process_single_fund, f, config, fetcher, tracker, val_engine, analyst, market_context, config['global']['base_invest_amount'], config['global']['max_daily_invest']): f for f in config.get('funds', [])}
+        for f in as_completed(futures):
+            res, log, _ = f.result()
+            if res: results.append(res); cio_lines.append(log)
 
-    @retry(retries=2, delay=5)
-    def advisor_review(self, report_text, macro_str):
-        prompt = RED_TEAM_AUDIT_PROMPT.format(current_date=datetime.now().strftime("%Y年%m月%d日"), macro_str=macro_str[:2500], report_text=report_text[:3000])
-        return self._call_r1(prompt)
+    if results:
+        results.sort(key=lambda x: -x['tech'].get('final_score', 0))
+        full_report = "\n".join(cio_lines)
+        cio_html = analyst.review_report(full_report, market_context) if analyst else ""
+        advisor_html = analyst.advisor_review(full_report, market_context) if analyst else ""
+        html = render_html_report_v13(all_news_seen, results, cio_html, advisor_html) 
+        send_email("🕊️ 鹊知风 V15.20 洞察微澜，御风而行", html, attachment_path=LOG_FILENAME)
 
-    def _call_r1(self, prompt):
-        payload = {"model": self.model_strategic, "messages": [{"role": "user", "content": prompt}], "max_tokens": 4000, "temperature": 0.3}
-        try:
-            resp = requests.post(f"{self.base_url}/chat/completions", headers=self.headers, json=payload, timeout=180)
-            return resp.json()['choices'][0]['message']['content'].replace("```html", "").replace("```", "").strip()
-        except: return "<p>分析生成中...</p>"
+if __name__ == "__main__": main()
