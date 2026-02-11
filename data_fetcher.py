@@ -82,6 +82,9 @@ class DataFetcher:
         """
         if df is None or df.empty:
             return df
+        
+        # [修复] 显式创建 DataFrame 的副本，避免 SettingWithCopyWarning
+        df = df.copy()
             
         # 确保所有统一字段都存在，缺失的填充为 NaN
         for col in self.UNIFIED_COLUMNS:
@@ -91,12 +94,12 @@ class DataFetcher:
         # 按统一顺序排列列
         df = df[self.UNIFIED_COLUMNS]
         
-        # 数据类型转换
+        # [修复] 使用 .loc 进行赋值，避免 SettingWithCopyWarning
         numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'amount', 
                        'amplitude', 'pct_change', 'change', 'turnover_rate']
         for col in numeric_cols:
             if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+                df.loc[:, col] = pd.to_numeric(df[col], errors='coerce')
         
         return df
 
@@ -187,10 +190,10 @@ class DataFetcher:
                 df['fetch_time'] = fetch_time
                 df['source'] = 'sina'
                 
-                # 基础类型清洗
+                # [修复] 使用 .loc 进行赋值，避免 SettingWithCopyWarning
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     if col in df.columns: 
-                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                        df.loc[:, col] = pd.to_numeric(df[col], errors='coerce')
                 
                 df = self._standardize_dataframe(df, "新浪")
                 return df, "新浪"
@@ -286,7 +289,7 @@ class DataFetcher:
 # [新增] 独立运行入口 (让此脚本变身爬虫)
 # ==========================================
 if __name__ == "__main__":
-    print("🚀 [DataFetcher] 启动多源行情抓取 (V15.17 Unified Fields)...")
+    print("🚀 [DataFetcher] 启动多源行情抓取 (V15.18 Fixed Warnings)...")
     
     def load_config_local():
         try:
@@ -317,4 +320,4 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"❌ 更新异常 {name}: {e}")
             
-    print(f"🏁 行情更新完成: {success_count}/{len(funds)} (统一字段结构)")
+    print(f"🏁 行情更新完成: {success_count}/{len(funds)} (统一字段结构，已修复警告)")
