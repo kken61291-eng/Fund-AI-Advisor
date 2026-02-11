@@ -34,7 +34,7 @@ def clean_markdown(text):
     text = re.sub(r'```(?:html|json|markdown)?', '', text)
     # 2. 移除常见的 Markdown 加粗标记
     text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
-    # 3. 移除标题标记 (如 ### 核心审计发现 -> 核心审计发现)
+    # 3. 移除标题标记 (针对 ### 核心审计发现 -> 核心审计发现)
     text = re.sub(r'#+\s+', '', text)
     return text.strip()
 
@@ -121,6 +121,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
         tech = r.get('tech', {})
         ai_data = r.get('ai_analysis', {})
         
+        # v3.2 数据提取
         bull_say = clean_markdown(ai_data.get('cgo_proposal', {}).get('catalyst', '无明显催化'))
         bear_say = clean_markdown(ai_data.get('cro_audit', {}).get('max_drawdown_scenario', '无'))
         chairman = clean_markdown(ai_data.get('chairman_conclusion', '无结论'))
@@ -179,7 +180,7 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
         .main-container {{ max-width: 600px; margin: 0 auto; background: #0a0c0e; border: 1px solid #2c3e50; padding: 15px; border-radius: 8px; }}
         .tech-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 5px; font-size: 11px; color: {COLOR_TEXT_SUB}; }}
         .cio-content, .advisor-content {{ line-height: 1.6; font-size: 13px; color: {COLOR_TEXT_MAIN} !important; }}
-        /* 强制排除 AI 可能生成的白底干扰 */
+        /* 强制覆盖 AI 可能生成的任何底色，确保为深色背景 */
         .cio-content *, .advisor-content * {{ background-color: transparent !important; color: inherit !important; }}
         @media (max-width: 480px) {{ .tech-grid {{ grid-template-columns: 1fr; }} .main-container {{ padding: 10px; border: none; }} }}
     </style></head><body>
@@ -207,13 +208,13 @@ def render_html_report_v13(all_news, results, cio_html, advisor_html):
 
 def process_single_fund(fund, config, fetcher, tracker, val_engine, analyst, market_context, base_amt, max_daily):
     """
-    适配 v3.2 JSON 字段提取，同时不改动核心处理流
+    适配 v3.2 JSON 字段提取
     """
     try:
         data = fetcher.get_fund_history(fund['code'])
         if data is None or data.empty: return None, "", []
         tech = TechnicalAnalyzer.calculate_indicators(data)
-        if not tech: return None, "", []
+        if not tech: return None, []
         
         val_mult, val_desc = val_engine.get_valuation_status(fund.get('index_name'), fund.get('strategy_type'))
         with tracker_lock: pos = tracker.get_position(fund['code'])
