@@ -12,7 +12,7 @@ class NewsAnalyst:
         self.api_key = os.getenv("LLM_API_KEY")
         self.base_url = os.getenv("LLM_BASE_URL")
         self.model_tactical = "Pro/deepseek-ai/DeepSeek-V3.2"      
-        self.model_strategic = "Pro/deepseek-ai/DeepSeek-R1"   
+        self.model_strategic = "Pro/deepseek-ai/DeepSeek-R1"    
 
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -23,6 +23,7 @@ class NewsAnalyst:
         """
         [核心逻辑 - 修改] 强制读取本地新闻文件
         不再进行联网抓取，只读 news_crawler.py 生成的文件
+        修改点：倒序排列新闻，优先投喂最新消息，并增加条数上限以填满上下文
         """
         today_str = get_beijing_time().strftime("%Y-%m-%d")
         
@@ -75,8 +76,14 @@ class NewsAnalyst:
         if not news_candidates:
             return "本地新闻文件内容为空。"
 
-        # 4. 截断 (保留前 30 条，防止 Token 溢出)
-        return "\n".join(news_candidates[:30])
+        # [修改点] 4. 倒序排列：确保最新的新闻在列表最前面
+        # 假设文件写入顺序是时间正序（旧->新），则 reverse 后为（新->旧）
+        news_candidates.reverse()
+
+        # [修改点] 5. 截断优化：扩大条数限制到 80 条
+        # 后续在 analyze_fund_v5 中会有 15000 字符的硬截断
+        # 这样做的目的是优先保证最新新闻被包含，直到达到字符长度限制
+        return "\n".join(news_candidates[:80])
 
     def _clean_json(self, text):
         try:
@@ -97,7 +104,7 @@ class NewsAnalyst:
             if stage in thresholds:
                 current_adj = res.get('adjustment', 0)
                 if current_adj > thresholds[stage]:
-                     res['adjustment'] = thresholds[stage]
+                      res['adjustment'] = thresholds[stage]
 
             # 2. 背离强制
             div_type = tech.get('macd', {}).get('divergence', 'NONE')
@@ -130,6 +137,7 @@ class NewsAnalyst:
         """
 
         # 确保 news 不为空，避免 AI 瞎编
+        # 注意：这里 news 已经是按时间倒序排列的字符串了
         safe_news = news if news and len(news) > 10 else "【注意】今日无本地新闻数据，请严格基于技术指标分析。"
 
         prompt = TACTICAL_IC_PROMPT.format(
@@ -137,9 +145,11 @@ class NewsAnalyst:
             trend_score=tech.get('quant_score', 50), fuse_level=fuse_level, fuse_msg=fuse_msg,
             rsi=rsi, macd_trend=f"{tech.get('macd', {}).get('trend', '-')} (背离:{tech.get('macd', {}).get('divergence', 'NONE')})", 
             volume_status="N/A",   
-            ma5_status=f"{ma_align} (ADX:{adx})",               
+            ma5_status=f"{ma_align} (ADX:{adx})",                
             ma20_status="N/A",
             ma60_status="N/A",
+            # [关键点] 这里限制 15000 字符。
+            # 由于 news 已经是倒序（最新在前），所以这里 [:15000] 会保留最新的约 50-80 条新闻，截断旧的。
             news_content=f"{extended_tech_context}\n\n【本地新闻摘要】\n{str(safe_news)[:15000]}"
         )
         
