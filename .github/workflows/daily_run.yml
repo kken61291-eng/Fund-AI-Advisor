@@ -17,6 +17,9 @@ permissions:
 jobs:
   analyze_and_report:
     runs-on: ubuntu-latest
+    # 【🔥核心修复】增加超时时间到 60 分钟（默认可能较短），防止 v3.5 推理时被中断
+    timeout-minutes: 60
+    
     env:
       TZ: Asia/Shanghai
 
