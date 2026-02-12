@@ -253,8 +253,8 @@ class DataFetcher:
             
             # [优化] 如果是东财数据，强制等待 40 秒，防止接口封禁
             if source == "东财":
-                logger.info("⏳ [东财] 触发频率保护机制，等待 40 秒...")
-                time.sleep(40)
+                logger.info("⏳ [东财] 触发频率保护机制，等待 45 秒...")
+                time.sleep(45)
                 
             return True
         else:
