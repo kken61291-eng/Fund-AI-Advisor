@@ -15,7 +15,7 @@ class NewsAnalyst:
         self.api_key = os.getenv("LLM_API_KEY")
         self.base_url = os.getenv("LLM_BASE_URL")
         # 请根据实际部署修改模型名称
-        self.model_tactical = "Pro/deepseek-ai/DeepSeek-V3.2"      
+        self.model_tactical = "Pro/deepseek-ai/DeepSeek-R1"      
         self.model_strategic = "Pro/deepseek-ai/DeepSeek-R1"    
 
         self.headers = {
