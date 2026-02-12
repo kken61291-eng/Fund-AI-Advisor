@@ -4,8 +4,9 @@ import time
 import random
 import os
 import yaml
-from datetime import datetime, time as dt_time
 import logging
+import requests
+from datetime import datetime, time as dt_time
 
 # ===================== 临时补充 utils 模块缺失的部分（如果需要） =====================
 def get_beijing_time():
@@ -17,16 +18,22 @@ def get_beijing_time():
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def retry(retries=3, delay=5):
-    """简易重试装饰器"""
+def retry(retries=3, delay=10):
+    """
+    简易重试装饰器
+    [优化] 默认重试间隔从 5s 增加到 10s，应对网络波动
+    """
     def decorator(func):
         def wrapper(*args, **kwargs):
             for i in range(retries):
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
+                    logger.warning(f"⚠️ [Retry {i+1}/{retries}] 操作失败: {e}, 等待 {delay}s 后重试...")
                     if i == retries - 1:
-                        raise e
+                        logger.error(f"❌ 重试耗尽，最终失败: {e}")
+                        # 不抛出异常，返回 None 以便后续逻辑降级处理
+                        return None, None 
                     time.sleep(delay)
             return None
         return wrapper
@@ -46,9 +53,12 @@ class DataFetcher:
         if not os.path.exists(self.DATA_DIR):
             os.makedirs(self.DATA_DIR)
             
+        # [优化] 扩充 User-Agent 池，防止被轻易识别
         self.user_agents = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15"
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
         ]
 
     def _verify_data_freshness(self, df, fund_code, source_name):
@@ -103,7 +113,7 @@ class DataFetcher:
         
         return df
 
-    @retry(retries=3, delay=5)
+    @retry(retries=2, delay=15)
     def _fetch_from_network(self, fund_code):
         """
         [私有方法] 纯联网获取数据 (东财 -> 新浪 -> 腾讯)
@@ -112,8 +122,11 @@ class DataFetcher:
         fetch_time = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
         
         # 1. 东财 (EastMoney) - 优先数据源，字段最全
+        # [优化] 增加随机延时，减少被 Ban 概率
         try:
-            time.sleep(random.uniform(1.0, 2.0)) 
+            time.sleep(random.uniform(3.0, 6.0)) 
+            logger.info(f"Trying EastMoney for {fund_code}...")
+            
             df = ak.fund_etf_hist_em(
                 symbol=fund_code, 
                 period="daily", 
@@ -145,20 +158,23 @@ class DataFetcher:
             df = self._standardize_dataframe(df, "东财")
             if not df.empty: 
                 return df, "东财"
+        except (ConnectionError, requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError) as e:
+            logger.error(f"❌ 东财连接被重置 (反爬拦截): {e}")
+            # 不抛出异常，让程序继续走下面的新浪逻辑
         except Exception as e:
-            logger.error(f"东财数据源异常: {e}")
+            logger.error(f"⚠️ 东财数据源异常: {e}")
             pass
 
-        # 2. 新浪 (Sina) - 字段有限，缺失字段填充 NaN
+        # 2. 新浪 (Sina) - 备用源，更稳定
         try:
-            time.sleep(1)
+            time.sleep(2)
+            logger.info(f"Falling back to Sina for {fund_code}...")
             df = ak.fund_etf_hist_sina(symbol=fund_code)
             
             if df.index.name in ['date', '日期']: 
                 df = df.reset_index()
             
-            # 新浪返回字段：日期、开盘、收盘、最高、最低、成交量（字段名可能为英文或中文）
-            # 需要智能识别列名
+            # 新浪返回字段需智能识别
             col_mapping = {}
             for col in df.columns:
                 col_str = str(col).lower()
@@ -190,7 +206,7 @@ class DataFetcher:
                 df['fetch_time'] = fetch_time
                 df['source'] = 'sina'
                 
-                # [修复] 使用 .loc 进行赋值，避免 SettingWithCopyWarning
+                # [修复] 使用 .loc 进行赋值
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     if col in df.columns: 
                         df.loc[:, col] = pd.to_numeric(df[col], errors='coerce')
@@ -198,12 +214,13 @@ class DataFetcher:
                 df = self._standardize_dataframe(df, "新浪")
                 return df, "新浪"
         except Exception as e:
-            logger.error(f"新浪数据源异常: {e}")
+            logger.error(f"⚠️ 新浪数据源异常: {e}")
             pass
 
-        # 3. 腾讯 (Tencent) - 字段较全，与东财类似
+        # 3. 腾讯 (Tencent) - 最后的防线
         try:
-            time.sleep(1)
+            time.sleep(2)
+            logger.info(f"Falling back to Tencent for {fund_code}...")
             prefix = 'sh' if fund_code.startswith('5') else ('sz' if fund_code.startswith('1') else '')
             if prefix:
                 df = ak.stock_zh_a_hist_tx(
@@ -212,7 +229,6 @@ class DataFetcher:
                     adjust="qfq"
                 )
                 
-                # 腾讯字段映射（与东财类似）
                 rename_map = {
                     '日期': 'date',
                     '开盘': 'open',
@@ -236,7 +252,7 @@ class DataFetcher:
                 if not df.empty: 
                     return df, "腾讯"
         except Exception as e:
-            logger.error(f"腾讯数据源异常: {e}")
+            logger.error(f"⚠️ 腾讯数据源异常: {e}")
             pass
         
         return None, None
@@ -246,19 +262,25 @@ class DataFetcher:
         [爬虫专用] 联网下载数据并保存到本地 CSV
         """
         df, source = self._fetch_from_network(fund_code)
-        if df is not None and not df.empty:
+        
+        # 处理 retry 装饰器返回 (None, None) 的情况
+        if df is None:
+            logger.error(f"❌ {fund_code} 所有数据源(东财/新浪/腾讯)均获取失败")
+            return False
+
+        if not df.empty:
             file_path = os.path.join(self.DATA_DIR, f"{fund_code}.csv")
             df.to_csv(file_path)
-            logger.info(f"💾 [{source}] {fund_code} 数据已保存至 {file_path} (统一字段结构)")
+            logger.info(f"💾 [{source}] {fund_code} 数据已保存至 {file_path}")
             
-            # [优化] 如果是东财数据，强制等待 40 秒，防止接口封禁
+            # [关键优化] 如果是东财数据，强制等待 65 秒 (应对最近的反爬升级)
             if source == "东财":
-                logger.info("⏳ [东财] 触发频率保护机制，等待 45 秒...")
-                time.sleep(45)
-                
+                logger.info("⏳ [东财] 触发频率保护机制，强制等待 65 秒...")
+                time.sleep(65)
+            
             return True
         else:
-            logger.error(f"❌ {fund_code} 所有数据源(东财/新浪/腾讯)均获取失败")
+            logger.error(f"❌ {fund_code} 数据为空")
             return False
 
     def get_fund_history(self, fund_code, days=250):
@@ -274,7 +296,6 @@ class DataFetcher:
         try:
             df = pd.read_csv(file_path, index_col='date', parse_dates=['date'])
             
-            # 解析抓取时间字段
             if 'fetch_time' in df.columns:
                 df['fetch_time'] = pd.to_datetime(df['fetch_time'])
             
@@ -289,7 +310,7 @@ class DataFetcher:
 # [新增] 独立运行入口 (让此脚本变身爬虫)
 # ==========================================
 if __name__ == "__main__":
-    print("🚀 [DataFetcher] 启动多源行情抓取 (V15.18 Fixed Warnings)...")
+    print("🚀 [DataFetcher] 启动多源行情抓取 (V15.19 Anti-Ban Mode)...")
     
     def load_config_local():
         try:
@@ -316,8 +337,9 @@ if __name__ == "__main__":
         try:
             if fetcher.update_cache(code):
                 success_count += 1
-            time.sleep(random.uniform(1.0, 2.0))
+            # 基础间隔，防止多源切换时也过快
+            time.sleep(random.uniform(2.0, 4.0))
         except Exception as e:
             print(f"❌ 更新异常 {name}: {e}")
             
-    print(f"🏁 行情更新完成: {success_count}/{len(funds)} (统一字段结构，已修复警告)")
+    print(f"🏁 行情更新完成: {success_count}/{len(funds)} (已启用强力防封模式)")
