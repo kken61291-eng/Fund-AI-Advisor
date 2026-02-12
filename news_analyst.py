@@ -2,15 +2,19 @@ import requests
 import json
 import os
 import re
-import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from utils import logger, retry, get_beijing_time
-from prompts_config import TACTICAL_IC_PROMPT, STRATEGIC_CIO_REPORT_PROMPT, RED_TEAM_AUDIT_PROMPT
+from prompts_config import TACTICAL_IC_PROMPT, STRATEGIC_CIO_REPORT_PROMPT, RED_TEAM_AUDIT_PROMPT, EVENT_TIER_DEFINITIONS
 
 class NewsAnalyst:
+    """
+    新闻分析师 - V3.5 适配版
+    新增：事件提取(Event Extraction)、Prompt动态填充
+    """
     def __init__(self):
         self.api_key = os.getenv("LLM_API_KEY")
         self.base_url = os.getenv("LLM_BASE_URL")
+        # 请根据实际部署修改模型名称
         self.model_tactical = "Pro/deepseek-ai/DeepSeek-V3.2"      
         self.model_strategic = "Pro/deepseek-ai/DeepSeek-R1"    
 
@@ -19,19 +23,41 @@ class NewsAnalyst:
             "Content-Type": "application/json"
         }
 
-    def get_market_context(self, max_length=35000): 
+    def extract_event_info(self, news_text):
         """
-        [核心逻辑 - 修改] 强制读取本地新闻文件
-        不再进行联网抓取，只读 news_crawler.py 生成的文件
-        修改点：倒序排列新闻，优先投喂最新消息，并增加条数上限以填满上下文
+        [v3.5] 从新闻中提取事件信息
+        返回: (days_to_event, event_tier)
         """
-        today_str = get_beijing_time().strftime("%Y-%m-%d")
+        days_to_event = "NULL"
+        event_tier = "TIER_C"
         
-        # 1. 寻找本地文件 (兼容两种路径)
-        possible_paths = [
-            f"data_news/news_{today_str}.jsonl",
-            f"news_{today_str}.jsonl"
-        ]
+        try:
+            # 1. 简单的正则提取 "N天后"
+            # 示例: "3天后召开会议" -> 3
+            match = re.search(r'(\d+)\s*天后', news_text)
+            if match:
+                days_to_event = int(match.group(1))
+            
+            # 2. 简单的关键词定级
+            # 只要新闻中包含 S 级或 A 级关键词
+            s_keywords = ["议息", "五年规划", "中央", "重磅"]
+            a_keywords = ["大会", "发布", "财报", "数据"]
+            
+            if any(k in news_text for k in s_keywords):
+                event_tier = "TIER_S"
+            elif any(k in news_text for k in a_keywords):
+                event_tier = "TIER_A"
+                if days_to_event == "NULL": days_to_event = 5 # 默认赋值
+                
+        except Exception as e:
+            logger.warning(f"事件提取失败: {e}")
+            
+        return days_to_event, event_tier
+
+    def get_market_context(self, max_length=35000): 
+        """读取本地新闻文件"""
+        today_str = get_beijing_time().strftime("%Y-%m-%d")
+        possible_paths = [f"data_news/news_{today_str}.jsonl", f"news_{today_str}.jsonl"]
         
         target_file = None
         for p in possible_paths:
@@ -39,14 +65,9 @@ class NewsAnalyst:
                 target_file = p
                 break
         
-        # 2. 如果没找到文件，返回警告
         if not target_file:
-            logger.warning(f"⚠️ 未找到今日新闻文件: {possible_paths}")
-            return "【系统提示】本地新闻库缺失，请先运行 news_crawler.py。当前仅基于技术面分析。"
+            return "【系统提示】本地新闻库缺失，请先运行 news_crawler.py。"
 
-        logger.info(f"📂 正在加载本地新闻: {target_file}")
-        
-        # 3. 读取并解析
         news_candidates = []
         try:
             with open(target_file, 'r', encoding='utf-8') as f:
@@ -56,33 +77,20 @@ class NewsAnalyst:
                         title = item.get('title', '').strip()
                         content = item.get('content', '').strip()
                         source = item.get('source', 'Local')
-                        # 截取时间字符串，只要 HH:MM
-                        time_str = str(item.get('time', ''))
-                        if len(time_str) > 16: time_str = time_str[5:16]
+                        time_str = str(item.get('time', ''))[:16]
                         
-                        if len(title) < 2: continue
-                        
-                        # 格式化
                         entry = f"[{time_str}] [{source}] {title}"
-                        # 如果有摘要且不重复，加上摘要
                         if len(content) > 30 and content != title:
-                            entry += f"\n   (摘要: {content[:150]}...)"
-                            
+                            entry += f"\n   (摘要: {content[:100]}...)"
                         news_candidates.append(entry)
                     except: pass
         except Exception as e:
             logger.error(f"读取新闻文件出错: {e}")
 
-        if not news_candidates:
-            return "本地新闻文件内容为空。"
+        if not news_candidates: return "本地新闻文件为空。"
 
-        # [修改点] 4. 倒序排列：确保最新的新闻在列表最前面
-        # 假设文件写入顺序是时间正序（旧->新），则 reverse 后为（新->旧）
+        # 倒序排列，优先保留最新新闻
         news_candidates.reverse()
-
-        # [修改点] 5. 截断优化：扩大条数限制到 80 条
-        # 后续在 analyze_fund_v5 中会有 15000 字符的硬截断
-        # 这样做的目的是优先保证最新新闻被包含，直到达到字符长度限制
         return "\n".join(news_candidates[:80])
 
     def _clean_json(self, text):
@@ -91,71 +99,70 @@ class NewsAnalyst:
             text = re.sub(r'```', '', text)
             text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
             start, end = text.find('{'), text.rfind('}')
-            if start != -1 and end != -1: text = text[start:end+1]
-            return re.sub(r',\s*([\]}])', r'\1', text)
+            if start != -1 and end != -1: return text[start:end+1]
+            return "{}"
         except: return "{}"
 
-    def _apply_logic_guardian(self, res, tech):
-        """逻辑守卫：修正幻觉"""
-        try:
-            # 1. 仓位限制
-            stage = res.get('trend_analysis', {}).get('stage', 'UNCLEAR')
-            thresholds = {"START": 50, "ACCELERATING": 80, "EXHAUSTION": 20, "REVERSAL": 0}
-            if stage in thresholds:
-                current_adj = res.get('adjustment', 0)
-                if current_adj > thresholds[stage]:
-                      res['adjustment'] = thresholds[stage]
-
-            # 2. 背离强制
-            div_type = tech.get('macd', {}).get('divergence', 'NONE')
-            if div_type == "TOP_DIVERGENCE" and res.get('decision') == 'EXECUTE':
-                res['decision'] = 'HOLD'
-                res['adjustment'] = 0
-        except: pass
-        return res
-
     @retry(retries=1, delay=2)
-    def analyze_fund_v5(self, fund_name, tech, macro, news, risk, strategy_type="core"):
+    def analyze_fund_v5(self, fund_name, tech, macro_data, news_text, risk, strategy_type="core"):
         """
-        [战术层] V3.2 生产版调用 - 全量指标投喂
+        [v3.5 核心] 战术层分析
         """
-        fuse_level, fuse_msg = risk['fuse_level'], risk['risk_msg']
+        # 1. 准备数据
+        fuse_level = risk.get('fuse_level', 0)
+        fuse_msg = risk.get('risk_msg', '')
         
-        # 提取指标
-        rsi = tech.get('rsi', 50)
-        trend_str = tech.get('trend_strength', {})
-        adx = trend_str.get('adx', 0)
-        trend_type = trend_str.get('trend_type', 'UNCLEAR')
-        ma_align = tech.get('ma_alignment', 'MIXED')
+        # 提取技术指标
+        trend_score = tech.get('quant_score', 0)
+        vol_status = tech.get('volatility_status', 'NORMAL')
+        recent_gain = tech.get('recent_gain', 0)
+        rs_score = tech.get('relative_strength', 0)
         
-        # 构造扩展上下文
-        extended_tech_context = f"""
-        【V17.0 高级量化全景】
-        1. 趋势雷达: ADX={adx} (趋势强度), 类型={trend_type}, 均线排列={ma_align}
-        2. MACD深度: 趋势={tech.get('macd', {}).get('trend', '-')}, 结构背离={tech.get('macd', {}).get('divergence', 'NONE')}
-        3. 量价结构: 量比={tech.get('volume_analysis', {}).get('vol_ratio', 1.0)}
-        """
+        # 提取宏观数据
+        net_flow = macro_data.get('net_flow', 0)
+        leader_status = macro_data.get('leader_status', 'UNKNOWN')
+        
+        # 提取事件信息
+        days_to_event, event_tier = self.extract_event_info(news_text)
 
-        # 确保 news 不为空，避免 AI 瞎编
-        # 注意：这里 news 已经是按时间倒序排列的字符串了
-        safe_news = news if news and len(news) > 10 else "【注意】今日无本地新闻数据，请严格基于技术指标分析。"
-
-        prompt = TACTICAL_IC_PROMPT.format(
-            fund_name=fund_name, strategy_type=strategy_type,
-            trend_score=tech.get('quant_score', 50), fuse_level=fuse_level, fuse_msg=fuse_msg,
-            rsi=rsi, macd_trend=f"{tech.get('macd', {}).get('trend', '-')} (背离:{tech.get('macd', {}).get('divergence', 'NONE')})", 
-            volume_status="N/A",   
-            ma5_status=f"{ma_align} (ADX:{adx})",                
-            ma20_status="N/A",
-            ma60_status="N/A",
-            # [关键点] 这里限制 15000 字符。
-            # 由于 news 已经是倒序（最新在前），所以这里 [:15000] 会保留最新的约 50-80 条新闻，截断旧的。
-            news_content=f"{extended_tech_context}\n\n【本地新闻摘要】\n{str(safe_news)[:15000]}"
-        )
+        # 2. 构造 Prompt
+        # 必须严格对应 prompts_config.py 中的 TACTICAL_IC_PROMPT 占位符
+        try:
+            prompt = TACTICAL_IC_PROMPT.format(
+                fund_name=fund_name, 
+                strategy_type=strategy_type,
+                trend_score=trend_score, 
+                fuse_level=fuse_level, 
+                fuse_msg=fuse_msg,
+                
+                # 技术面
+                rsi=tech.get('rsi', 50), 
+                macd_trend=tech.get('macd', {}).get('trend', '-'), 
+                volume_status=tech.get('volume_analysis', {}).get('status', 'NORMAL'),
+                
+                # v3.5 新增字段
+                days_to_event=days_to_event,
+                event_tier=event_tier,
+                volatility_status=vol_status,
+                recent_gain=recent_gain,
+                relative_strength=rs_score,
+                net_flow=f"{net_flow}亿",
+                leader_status=leader_status,
+                
+                # 新闻内容
+                news_content=str(news_text)[:12000]
+            )
+        except Exception as e:
+            logger.error(f"Prompt 构造异常: {e}")
+            return self._get_fallback_result()
         
+        # 3. 调用 API
         payload = {
-            "model": self.model_tactical, "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1, "max_tokens": 1200, "response_format": {"type": "json_object"}
+            "model": self.model_tactical, 
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1, 
+            "max_tokens": 1200, 
+            "response_format": {"type": "json_object"}
         }
         
         try:
@@ -163,29 +170,40 @@ class NewsAnalyst:
             if resp.status_code != 200: return self._get_fallback_result()
             
             result = json.loads(self._clean_json(resp.json()['choices'][0]['message']['content']))
-            result = self._apply_logic_guardian(result, tech)
-            if fuse_level >= 2:
-                result['decision'], result['adjustment'] = 'REJECT', -100
-                result['chairman_conclusion'] = f'[系统熔断] {fuse_msg}'
+            
+            # 将 days_to_event 注入回结果，方便 StrategyEngine 使用
+            if 'trend_analysis' not in result: result['trend_analysis'] = {}
+            result['trend_analysis']['days_to_event'] = days_to_event
+            
             return result
         except Exception as e:
             logger.error(f"AI Analysis Failed {fund_name}: {e}")
             return self._get_fallback_result()
 
     def _get_fallback_result(self):
-        return {"decision": "HOLD", "adjustment": 0, "trend_analysis": {"stage": "UNCLEAR"}}
+        return {
+            "decision": "HOLD", 
+            "adjustment": 0, 
+            "strategy_meta": {"mode": "WAIT", "rationale": "系统故障兜底"},
+            "position_size": 0
+        }
 
     @retry(retries=2, delay=5)
     def review_report(self, report_text, macro_str):
-        # 确保 macro_str 不为空
-        safe_macro = macro_str if macro_str and len(macro_str) > 10 else "暂无新闻数据。"
-        prompt = STRATEGIC_CIO_REPORT_PROMPT.format(current_date=datetime.now().strftime("%Y年%m月%d日"), macro_str=safe_macro[:2500], report_text=report_text[:3000])
+        prompt = STRATEGIC_CIO_REPORT_PROMPT.format(
+            current_date=datetime.now().strftime("%Y年%m月%d日"), 
+            macro_str=str(macro_str)[:2000], 
+            report_text=str(report_text)[:3000]
+        )
         return self._call_r1(prompt)
 
     @retry(retries=2, delay=5)
     def advisor_review(self, report_text, macro_str):
-        safe_macro = macro_str if macro_str and len(macro_str) > 10 else "暂无新闻数据。"
-        prompt = RED_TEAM_AUDIT_PROMPT.format(current_date=datetime.now().strftime("%Y年%m月%d日"), macro_str=safe_macro[:2500], report_text=report_text[:3000])
+        prompt = RED_TEAM_AUDIT_PROMPT.format(
+            current_date=datetime.now().strftime("%Y年%m月%d日"), 
+            macro_str=str(macro_str)[:2000], 
+            report_text=str(report_text)[:3000]
+        )
         return self._call_r1(prompt)
 
     def _call_r1(self, prompt):
