@@ -103,8 +103,7 @@ def process_single_fund(fund, config, fetcher, tracker, val_engine, analyst, mar
             logger.warning(f"❌ [2/6] 技术指标计算失败: {fund_name}")
             return None, "", []
         
-        # 3. 估值分析 【🔥修复点：使用新的参数格式】
-        # 你的 valuation_engine.py 是零网络版，只需要 code 和 data
+        # 3. 估值分析
         val_mult, val_desc = val_engine.get_valuation_status(fund_code, data)
         
         with tracker_lock: pos = tracker.get_position(fund_code)
@@ -116,7 +115,15 @@ def process_single_fund(fund, config, fetcher, tracker, val_engine, analyst, mar
             cro_signal = tech.get('tech_cro_signal', 'PASS')
             risk_payload = {"fuse_level": 3 if cro_signal == 'VETO' else 0, "risk_msg": tech.get('tech_cro_comment', '监控')}
             
-            ai_res = analyst.analyze_fund_v5(fund_name, tech, None, market_context, risk_payload, fund.get('strategy_type', 'core'))
+            # [🔥修复] 构造 macro_payload 字典，避免传 None
+            # 这里简单构造一个默认值，或者如果有 market_scanner 可以传真实数据
+            macro_payload = {
+                "net_flow": 0,  # 默认值，或者从 market_context 中解析
+                "leader_status": "UNKNOWN"
+            }
+            
+            # [🔥修复] 第三个参数传入 macro_payload
+            ai_res = analyst.analyze_fund_v5(fund_name, tech, macro_payload, market_context, risk_payload, fund.get('strategy_type', 'core'))
             logger.info(f"🗣️ [投委会] {ai_res.get('decision')} | 阶段:{ai_res.get('trend_analysis',{}).get('stage')}")
 
         ai_adj = ai_res.get('adjustment', 0)
