@@ -108,6 +108,10 @@ class NewsAnalyst:
         """
         [v3.5 核心] 战术层分析
         """
+        # [🔥关键修复] 如果 macro_data 为空，给一个默认空字典，防止 .get() 报错
+        if macro_data is None:
+            macro_data = {}
+
         # 1. 准备数据
         fuse_level = risk.get('fuse_level', 0)
         fuse_msg = risk.get('risk_msg', '')
@@ -118,7 +122,7 @@ class NewsAnalyst:
         recent_gain = tech.get('recent_gain', 0)
         rs_score = tech.get('relative_strength', 0)
         
-        # 提取宏观数据
+        # 提取宏观数据 (现在安全了)
         net_flow = macro_data.get('net_flow', 0)
         leader_status = macro_data.get('leader_status', 'UNKNOWN')
         
