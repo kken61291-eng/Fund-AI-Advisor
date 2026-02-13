@@ -18,7 +18,7 @@ except ImportError:
     print("❌ 请先安装依赖: pip install curl_cffi pandas pyyaml")
     sys.exit(1)
 
-# ===================== 配置加载 (环境变量优先) =====================
+# ===================== 配置加载 =====================
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -27,20 +27,17 @@ logger = logging.getLogger(__name__)
 
 # 🟢 优先从系统环境变量获取 Key
 SCRAPERAPI_KEY = os.environ.get("SCRAPERAPI_KEY", "")
-
-# 尝试读取本地 settings.py
 if not SCRAPERAPI_KEY:
     try:
         import settings
         SCRAPERAPI_KEY = getattr(settings, 'SCRAPERAPI_KEY', "")
-    except ImportError:
-        pass
+    except ImportError: pass
 
-# 允许自动降级
+# 🟢 [优化] 允许自动降级，且更激进
 ALLOW_DIRECT_FALLBACK = True 
 
 if not SCRAPERAPI_KEY:
-    logger.warning("⚠️ 未检测到 SCRAPERAPI_KEY (Secrets 或 settings)，将仅使用直连模式")
+    logger.warning("⚠️ 未检测到 SCRAPERAPI_KEY，将仅使用直连模式")
 else:
     masked_key = f"{SCRAPERAPI_KEY[:4]}****{SCRAPERAPI_KEY[-4:]}" if len(SCRAPERAPI_KEY) > 8 else "****"
     logger.info(f"🔑 已加载 ScraperAPI Key: {masked_key}")
@@ -57,11 +54,9 @@ class DataFetcher:
     def __init__(self):
         self.DATA_DIR = "data_cache"
         os.makedirs(self.DATA_DIR, exist_ok=True)
-        
         self.spot_data_cache: Optional[pd.DataFrame] = None
         self.spot_data_date: Optional[str] = None
         self.session: Optional[cffi_requests.Session] = None
-        
         self.total_funds = 0
         self.success_count = 0
         
@@ -76,63 +71,72 @@ class DataFetcher:
                 self.session = cffi_requests.Session(
                     impersonate="chrome120",
                     proxies={"http": proxy_url, "https": proxy_url},
-                    timeout=60,
+                    # 🟢 [优化] 超时由 60s 改为 15s，防止卡死
+                    timeout=15,
                     verify=False 
                 )
             else:
                 self.session = cffi_requests.Session(
                     impersonate="chrome120",
-                    timeout=30
+                    timeout=15 
                 )
+                if use_proxy: logger.info("⚡ 切换为直连模式 (Direct)")
         except Exception as e:
             logger.error(f"❌ 创建 session 失败: {e}")
             raise
 
     def _close_session(self):
         if self.session:
-            try:
-                self.session.close()
-            except:
-                pass
+            try: self.session.close()
+            except: pass
             self.session = None
             gc.collect()
 
-    def _safe_request(self, url: str, params: dict, headers: dict, max_retries: int = 3) -> Optional[dict]:
-        use_proxy_default = True if SCRAPERAPI_KEY else False
+    def _safe_request(self, url: str, params: dict, headers: dict, max_retries: int = 2) -> Optional[dict]:
+        """
+        激进的请求策略：
+        如果配置了 Key，第一次尝试代理。
+        如果失败或超时，**立刻**切换到本机直连，不再重试代理。
+        """
+        # 第一次尝试：根据是否有 Key 决定
+        use_proxy_first = True if SCRAPERAPI_KEY else False
         
+        # 确保 session 存在
         if self.session is None:
-            self._create_session(use_proxy=use_proxy_default)
+            self._create_session(use_proxy=use_proxy_first)
 
-        for attempt in range(max_retries):
+        for attempt in range(max_retries + 1):
             try:
                 if not self.session: raise Exception("Session Lost")
                 r = self.session.get(url, params=params, headers=headers)
                 
+                # 403 处理
                 if r.status_code == 403:
-                    logger.warning("⚠️ ScraperAPI 返回 403 (额度耗尽/Key错误)")
+                    logger.warning("⚠️ 403 Forbidden (可能是代理额度耗尽)")
                     if ALLOW_DIRECT_FALLBACK:
+                         logger.info("🔄 403 -> 立即切换直连")
                          self._create_session(use_proxy=False)
-                         try:
-                             r = self.session.get(url, params=params, headers=headers)
-                             r.raise_for_status()
-                             return r.json()
-                         except Exception as e:
-                             return None
-                    else:
-                        return None
-                        
-                r.raise_for_status()
-                return r.json()
-            except (ProxyError, Timeout, RequestException) as e:
-                time.sleep(2) 
-                if attempt == max_retries - 1 and ALLOW_DIRECT_FALLBACK:
-                     self._create_session(use_proxy=False)
-                     try:
+                         # 立即重试一次
                          r = self.session.get(url, params=params, headers=headers)
                          r.raise_for_status()
                          return r.json()
-                     except:
-                         pass
+                    return None
+                        
+                r.raise_for_status()
+                return r.json()
+                
+            except (ProxyError, Timeout, RequestException, Exception) as e:
+                # 🟢 [优化] 打印详细错误，不再静默
+                # logger.warning(f"⚠️ 尝试 {attempt+1} 失败: {str(e)[:50]}...")
+                
+                # 如果是代理模式失败，且允许降级，立刻切直连
+                if ALLOW_DIRECT_FALLBACK:
+                     # 只要出问题，马上切直连，不墨迹
+                     self._create_session(use_proxy=False)
+                else:
+                     time.sleep(1)
+        
+        logger.error("❌ 所有尝试均失败 (代理&直连)")
         return None
 
     def fetch_all_etfs(self) -> Optional[pd.DataFrame]:
@@ -143,19 +147,17 @@ class DataFetcher:
         
         logger.info("📡 正在更新全市场 ETF 数据...")
         
+        # 🟢 [优化] 显示进度条感
+        start_time = time.time()
+        
         while page <= 200 and consecutive_errors < 3:
+            # 宽泛的基金筛选参数
             fs_param = "b:MK0021,b:MK0022,b:MK0023,b:MK0024,m:1 t:2,m:1 t:23,m:0 t:6,m:0 t:80"
             
             params = {
-                "pn": str(page),
-                "pz": "100",
-                "po": "1",
-                "np": "1",
+                "pn": str(page), "pz": "100", "po": "1", "np": "1",
                 "ut": "bd1d9ddb04089700cf9c27f6f7426281",
-                "fltt": "2",
-                "invt": "2",
-                "fid": "f3",
-                "fs": fs_param,
+                "fltt": "2", "invt": "2", "fid": "f3", "fs": fs_param,
                 "fields": "f12,f14,f2,f3,f4,f5,f6,f7,f8,f15,f16,f17,f18",
                 "_": str(int(time.time() * 1000))
             }
@@ -165,10 +167,11 @@ class DataFetcher:
                 "Referer": "http://quote.eastmoney.com/",
             }
             
-            data = self._safe_request(url, params, headers, max_retries=3)
+            data = self._safe_request(url, params, headers, max_retries=2)
             
             if not data or data.get('rc') != 0 or 'data' not in data or 'diff' not in data['data']:
                 consecutive_errors += 1
+                logger.warning(f"⚠️ 第 {page} 页获取失败 ({consecutive_errors}/3)")
                 if consecutive_errors >= 3: break
                 continue
             
@@ -177,11 +180,19 @@ class DataFetcher:
             if not items: break
             all_data.extend(items)
             
+            # 🟢 [优化] 每 10 页才打印一次，避免刷屏，但第1页必须打印
+            if page == 1 or page % 20 == 0:
+                logger.info(f"📄 已获取 {page} 页 (累计 {len(all_data)} 条)...")
+            
             if len(items) < 100: break
             page += 1
-            time.sleep(0.5) 
+            # 直连模式下不需要 sleep 太久，0.1即可
+            time.sleep(0.1) 
         
         self._close_session()
+        
+        duration = time.time() - start_time
+        logger.info(f"✅ 全量抓取完成，耗时 {duration:.1f}s")
         
         if not all_data: return None
         
@@ -217,7 +228,7 @@ class DataFetcher:
         code = str(fund_code).strip().lower().replace('sh', '').replace('sz', '')
         
         if code not in self.spot_data_cache.index:
-            logger.warning(f"⚠️ 未找到 {fund_code}")
+            logger.warning(f"⚠️ 未找到 {fund_code} (请确认代码是否正确)")
             return False
         
         try:
@@ -296,20 +307,16 @@ class DataFetcher:
             return pd.DataFrame()
 
     def get_market_net_flow(self) -> float:
-        """获取全市场(上证+深证)主力资金净流入 (单位: 亿)"""
+        """获取全市场资金流"""
         try:
             url = "https://push2.eastmoney.com/api/qt/ulist.np/get"
             params = {
-                "fltt": "2",
-                "secids": "1.000001,0.399001",
-                "fields": "f62",
+                "fltt": "2", "secids": "1.000001,0.399001", "fields": "f62",
                 "_": str(int(time.time() * 1000))
             }
             headers = {"User-Agent": "Mozilla/5.0"}
             data = self._safe_request(url, params, headers)
-            
-            if not data or 'diff' not in data.get('data', {}):
-                return 0.0
+            if not data or 'diff' not in data.get('data', {}): return 0.0
             
             total_flow = 0.0
             for item in data['data']['diff']:
@@ -324,7 +331,6 @@ class DataFetcher:
         self.success_count = 0
         
         logger.info("🔍 正在初始化...")
-        # 顺便打印一下宏观资金流
         flow = self.get_market_net_flow()
         logger.info(f"💰 [Macro] 全市场主力净流入: {flow} 亿")
 
@@ -341,10 +347,9 @@ class DataFetcher:
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("🚀 DataFetcher V23.8 (Fixed Main Loop)")
+    print("🚀 DataFetcher V23.9 (Fast Timeout & Fallback)")
     print("=" * 60)
     
-    # 🟢 修复：加载 config.yaml 并执行循环
     funds = []
     if os.path.exists('config.yaml'):
         try:
