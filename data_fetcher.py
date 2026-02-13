@@ -25,7 +25,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 🟢 优先从系统环境变量获取 Key
 SCRAPERAPI_KEY = os.environ.get("SCRAPERAPI_KEY", "")
 if not SCRAPERAPI_KEY:
     try:
@@ -33,7 +32,6 @@ if not SCRAPERAPI_KEY:
         SCRAPERAPI_KEY = getattr(settings, 'SCRAPERAPI_KEY', "")
     except ImportError: pass
 
-# 🟢 [优化] 允许自动降级，且更激进
 ALLOW_DIRECT_FALLBACK = True 
 
 if not SCRAPERAPI_KEY:
@@ -59,6 +57,7 @@ class DataFetcher:
         self.session: Optional[cffi_requests.Session] = None
         self.total_funds = 0
         self.success_count = 0
+        self.target_codes = [] # 存储目标基金代码
         
     def _get_scraperapi_proxy(self) -> str:
         return f"http://scraperapi:{SCRAPERAPI_KEY}@proxy-server.scraperapi.com:8001"
@@ -71,7 +70,6 @@ class DataFetcher:
                 self.session = cffi_requests.Session(
                     impersonate="chrome120",
                     proxies={"http": proxy_url, "https": proxy_url},
-                    # 🟢 [优化] 超时由 60s 改为 15s，防止卡死
                     timeout=15,
                     verify=False 
                 )
@@ -80,7 +78,6 @@ class DataFetcher:
                     impersonate="chrome120",
                     timeout=15 
                 )
-                if use_proxy: logger.info("⚡ 切换为直连模式 (Direct)")
         except Exception as e:
             logger.error(f"❌ 创建 session 失败: {e}")
             raise
@@ -93,15 +90,7 @@ class DataFetcher:
             gc.collect()
 
     def _safe_request(self, url: str, params: dict, headers: dict, max_retries: int = 2) -> Optional[dict]:
-        """
-        激进的请求策略：
-        如果配置了 Key，第一次尝试代理。
-        如果失败或超时，**立刻**切换到本机直连，不再重试代理。
-        """
-        # 第一次尝试：根据是否有 Key 决定
         use_proxy_first = True if SCRAPERAPI_KEY else False
-        
-        # 确保 session 存在
         if self.session is None:
             self._create_session(use_proxy=use_proxy_first)
 
@@ -110,13 +99,11 @@ class DataFetcher:
                 if not self.session: raise Exception("Session Lost")
                 r = self.session.get(url, params=params, headers=headers)
                 
-                # 403 处理
                 if r.status_code == 403:
-                    logger.warning("⚠️ 403 Forbidden (可能是代理额度耗尽)")
+                    logger.warning("⚠️ 403 Forbidden (代理额度耗尽)")
                     if ALLOW_DIRECT_FALLBACK:
                          logger.info("🔄 403 -> 立即切换直连")
                          self._create_session(use_proxy=False)
-                         # 立即重试一次
                          r = self.session.get(url, params=params, headers=headers)
                          r.raise_for_status()
                          return r.json()
@@ -124,79 +111,60 @@ class DataFetcher:
                         
                 r.raise_for_status()
                 return r.json()
-                
             except (ProxyError, Timeout, RequestException, Exception) as e:
-                # 🟢 [优化] 打印详细错误，不再静默
-                # logger.warning(f"⚠️ 尝试 {attempt+1} 失败: {str(e)[:50]}...")
-                
-                # 如果是代理模式失败，且允许降级，立刻切直连
                 if ALLOW_DIRECT_FALLBACK:
-                     # 只要出问题，马上切直连，不墨迹
                      self._create_session(use_proxy=False)
                 else:
                      time.sleep(1)
         
-        logger.error("❌ 所有尝试均失败 (代理&直连)")
+        logger.error("❌ 所有尝试均失败")
         return None
 
-    def fetch_all_etfs(self) -> Optional[pd.DataFrame]:
-        url = "https://push2.eastmoney.com/api/qt/clist/get"
-        all_data = []
-        page = 1
-        consecutive_errors = 0
+    # 🟢 [核心修改] 精准抓取：只抓取 config 中的基金，不再翻页抓取全市场
+    def fetch_specific_etfs(self, codes: List[str]) -> Optional[pd.DataFrame]:
+        url = "https://push2.eastmoney.com/api/qt/ulist.np/get"
         
-        logger.info("📡 正在更新全市场 ETF 数据...")
+        if not codes:
+            logger.warning("⚠️ 目标代码列表为空")
+            return None
+
+        # 构造 secids (东财代码格式转换)
+        # 沪市(5/6开头) -> 1.xxxxx
+        # 深市(1/0/3开头) -> 0.xxxxx
+        secids_list = []
+        for code in codes:
+            c = str(code).strip()
+            if c.startswith('5') or c.startswith('6'):
+                secids_list.append(f"1.{c}")
+            else:
+                secids_list.append(f"0.{c}")
         
-        # 🟢 [优化] 显示进度条感
-        start_time = time.time()
+        secids_str = ",".join(secids_list)
         
-        while page <= 200 and consecutive_errors < 3:
-            # 宽泛的基金筛选参数
-            fs_param = "b:MK0021,b:MK0022,b:MK0023,b:MK0024,m:1 t:2,m:1 t:23,m:0 t:6,m:0 t:80"
-            
-            params = {
-                "pn": str(page), "pz": "100", "po": "1", "np": "1",
-                "ut": "bd1d9ddb04089700cf9c27f6f7426281",
-                "fltt": "2", "invt": "2", "fid": "f3", "fs": fs_param,
-                "fields": "f12,f14,f2,f3,f4,f5,f6,f7,f8,f15,f16,f17,f18",
-                "_": str(int(time.time() * 1000))
-            }
-            
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Referer": "http://quote.eastmoney.com/",
-            }
-            
-            data = self._safe_request(url, params, headers, max_retries=2)
-            
-            if not data or data.get('rc') != 0 or 'data' not in data or 'diff' not in data['data']:
-                consecutive_errors += 1
-                logger.warning(f"⚠️ 第 {page} 页获取失败 ({consecutive_errors}/3)")
-                if consecutive_errors >= 3: break
-                continue
-            
-            consecutive_errors = 0
-            items = data['data']['diff']
-            if not items: break
-            all_data.extend(items)
-            
-            # 🟢 [优化] 每 10 页才打印一次，避免刷屏，但第1页必须打印
-            if page == 1 or page % 20 == 0:
-                logger.info(f"📄 已获取 {page} 页 (累计 {len(all_data)} 条)...")
-            
-            if len(items) < 100: break
-            page += 1
-            # 直连模式下不需要 sleep 太久，0.1即可
-            time.sleep(0.1) 
+        logger.info(f"📡 正在精准抓取 {len(codes)} 只基金数据...")
         
-        self._close_session()
+        params = {
+            "fltt": "2",
+            "secids": secids_str,
+            "fields": "f12,f14,f2,f3,f4,f5,f6,f7,f8,f15,f16,f17,f18",
+            "_": str(int(time.time() * 1000))
+        }
         
-        duration = time.time() - start_time
-        logger.info(f"✅ 全量抓取完成，耗时 {duration:.1f}s")
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        }
         
-        if not all_data: return None
+        # 只请求一次，无需循环翻页
+        data = self._safe_request(url, params, headers, max_retries=3)
         
-        df = pd.DataFrame(all_data)
+        if not data or 'diff' not in data.get('data', {}):
+            logger.error("❌ 获取失败: 数据为空")
+            return None
+        
+        items = data['data']['diff']
+        logger.info(f"✅ 成功获取 {len(items)} 条数据")
+        
+        df = pd.DataFrame(items)
         rename_map = {
             'f12': 'code', 'f14': 'name', 'f2': 'close', 'f3': 'pct_change',
             'f4': 'change', 'f5': 'volume', 'f6': 'amount', 'f7': 'amplitude',
@@ -214,7 +182,16 @@ class DataFetcher:
     def init_spot_data(self) -> bool:
         today = get_beijing_time().strftime("%Y-%m-%d")
         if self.spot_data_cache is not None and self.spot_data_date == today: return True
-        df = self.fetch_all_etfs()
+        
+        # 🟢 关键：传入目标代码进行精准抓取
+        if self.target_codes:
+            df = self.fetch_specific_etfs(self.target_codes)
+        else:
+            # 如果没有目标代码（理论上不会），回退到旧逻辑（不推荐）
+            logger.warning("⚠️ 无目标代码，尝试全量抓取(不稳定)...")
+            # 这里留空，让 update_single 处理
+            return False
+
         if df is not None and not df.empty:
             self.spot_data_cache = df
             self.spot_data_date = today
@@ -222,14 +199,24 @@ class DataFetcher:
         return False
 
     def update_single(self, fund_code: str) -> bool:
+        # 如果缓存为空，尝试初始化
         if self.spot_data_cache is None:
+            # 如果 target_codes 为空，临时把当前这一个加进去尝试抓取
+            if not self.target_codes:
+                self.target_codes = [fund_code]
             if not self.init_spot_data(): return False
         
         code = str(fund_code).strip().lower().replace('sh', '').replace('sz', '')
         
         if code not in self.spot_data_cache.index:
-            logger.warning(f"⚠️ 未找到 {fund_code} (请确认代码是否正确)")
-            return False
+            # 如果缓存里没有，可能是漏了，尝试单独抓这一个
+            logger.warning(f"⚠️ 缓存未命中 {fund_code}，尝试单独补录...")
+            df_single = self.fetch_specific_etfs([code])
+            if df_single is not None and not df_single.empty:
+                 self.spot_data_cache = pd.concat([self.spot_data_cache, df_single])
+            else:
+                 logger.error(f"❌ 无法找到 {fund_code}")
+                 return False
         
         try:
             row = self.spot_data_cache.loc[code]
@@ -286,7 +273,9 @@ class DataFetcher:
         path = os.path.join(self.DATA_DIR, f"{code}.csv")
         
         if not os.path.exists(path):
-            logger.warning(f"⚠️ 本地无数据，尝试抓取 {fund_code}...")
+            # logger.warning(f"⚠️ 本地无数据，尝试抓取 {fund_code}...")
+            # 临时添加目标并抓取
+            self.target_codes.append(fund_code)
             if not self.update_single(fund_code):
                 return pd.DataFrame()
         
@@ -330,12 +319,19 @@ class DataFetcher:
         self.total_funds = len(funds)
         self.success_count = 0
         
+        # 1. 提取所有需要抓取的代码
+        self.target_codes = [str(f.get('code')).strip() for f in funds if f.get('code')]
+        
         logger.info("🔍 正在初始化...")
         flow = self.get_market_net_flow()
         logger.info(f"💰 [Macro] 全市场主力净流入: {flow} 亿")
 
-        if not self.init_spot_data(): return 0
+        # 2. 一次性精准抓取
+        if not self.init_spot_data(): 
+            logger.error("❌ 初始化抓取失败")
+            return 0
         
+        # 3. 遍历保存
         for i, fund in enumerate(funds, 1):
             code = str(fund.get('code', '')).strip()
             if not code: continue
@@ -347,7 +343,7 @@ class DataFetcher:
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("🚀 DataFetcher V23.9 (Fast Timeout & Fallback)")
+    print("🚀 DataFetcher V24.0 (Targeted Fetch Mode)")
     print("=" * 60)
     
     funds = []
@@ -363,7 +359,7 @@ if __name__ == "__main__":
         logger.warning("⚠️ config.yaml 未找到，使用默认测试数据")
         funds = [{'code': '510300', 'name': '沪深300ETF'}, {'code': '510050', 'name': '上证50ETF'}]
     
-    print(f"📋 计划抓取 {len(funds)} 只基金...")
+    print(f"📋 计划精准抓取 {len(funds)} 只基金...")
     
     fetcher = DataFetcher()
     success = fetcher.run(funds)
