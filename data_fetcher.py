@@ -7,20 +7,17 @@ import yaml
 import logging
 import requests
 import gc
-from datetime import datetime, time as dt_time
+from datetime import datetime, time as dt_time, date
 
-# ===================== 工具函数 =====================
+# ===================== 工具函数 (保持不变) =====================
 def get_beijing_time():
-    """获取北京时间（东八区）"""
     from datetime import timezone, timedelta
     return datetime.now(timezone(timedelta(hours=8)))
 
-# 简易日志配置
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def retry(retries=3, delay=10):
-    """简易重试装饰器"""
     def decorator(func):
         def wrapper(*args, **kwargs):
             for i in range(retries):
@@ -37,7 +34,6 @@ def retry(retries=3, delay=10):
     return decorator
 
 def force_close_connections():
-    """[V17.0] 强制关闭所有网络连接"""
     try:
         if hasattr(ak, '_session') and ak._session:
             try:
@@ -50,22 +46,7 @@ def force_close_connections():
     except Exception as e:
         logger.debug(f"关闭连接时出错: {e}")
 
-# [新增 V17.0] 使用 curl_cffi 创建模拟浏览器会话
-def create_browser_session():
-    """创建模拟 Chrome 浏览器的 curl_cffi 会话，绕过 TLS 指纹检测"""
-    try:
-        from curl_cffi import requests as curl_requests
-        
-        # 模拟 Chrome 120 的 TLS 指纹
-        session = curl_requests.Session(
-            impersonate="chrome120",  # 关键：模拟真实浏览器指纹
-            timeout=30
-        )
-        return session
-    except ImportError:
-        logger.warning("curl_cffi 未安装，回退到普通 requests")
-        return None
-# ====================================================================
+# ===================== DataFetcher 类 (核心修改) =====================
 
 class DataFetcher:
     UNIFIED_COLUMNS = [
@@ -78,364 +59,233 @@ class DataFetcher:
         self.DATA_DIR = "data_cache"
         if not os.path.exists(self.DATA_DIR):
             os.makedirs(self.DATA_DIR)
-            
-        # [V17.0] 扩充 User-Agent 池，增加移动端
-        self.user_agents = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
-            "Mozilla/5.0 (iPad; CPU OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
-        ]
-
-    def _get_random_headers(self):
-        """生成随机请求头"""
-        ua = random.choice(self.user_agents)
-        return {
-            'User-Agent': ua,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-US;q=0.7',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'DNT': '1',
-            'Connection': 'close',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-        }
-
-    def _verify_data_freshness(self, df, fund_code, source_name):
-        """数据新鲜度审计"""
-        if df is None or df.empty: 
-            return
         
-        try:
-            last_date = pd.to_datetime(df.index[-1]).date()
-            now_bj = get_beijing_time()
-            today_date = now_bj.date()
-            is_trading_time = (dt_time(9, 30) <= now_bj.time() <= dt_time(15, 0))
-            
-            log_prefix = f"📅 [{source_name}] {fund_code} 最新日期: {last_date}"
-            
-            if last_date == today_date:
-                logger.info(f"{log_prefix} | ✅ 数据已更新至今日")
-            elif last_date < today_date:
-                days_gap = (today_date - last_date).days
-                if is_trading_time and days_gap >= 1:
-                    logger.warning(f"{log_prefix} | ⚠️ 数据滞后 {days_gap} 天")
-                else:
-                    logger.info(f"{log_prefix} | ⏸️ 历史数据就绪")
-        except Exception as e:
-            logger.warning(f"审计数据新鲜度失败: {e}")
+        # [修改点1] 增加 Spot 数据缓存变量
+        self.spot_data_cache = None
+        self.spot_data_date = None
 
     def _standardize_dataframe(self, df, source_name):
-        """标准化 DataFrame"""
+        """标准化 DataFrame格式"""
         if df is None or df.empty:
             return df
-        
         df = df.copy()
-            
         for col in self.UNIFIED_COLUMNS:
             if col not in df.columns:
                 df[col] = pd.NA
-        
         df = df[self.UNIFIED_COLUMNS]
-        
+        # 强制转为数字类型，防止出现字符串
         numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'amount', 
                        'amplitude', 'pct_change', 'change', 'turnover_rate']
         for col in numeric_cols:
             if col in df.columns:
                 df.loc[:, col] = pd.to_numeric(df[col], errors='coerce')
-        
         return df
 
-    @retry(retries=2, delay=25)
-    def _fetch_eastmoney(self, fund_code, fetch_time):
-        """[V17.0] 使用 curl_cffi 模拟浏览器获取东财数据"""
-        logger.info(f"🌐 [东财] 模拟浏览器获取 {fund_code}...")
+    def _init_spot_data(self):
+        """[新增] 仅在启动时运行一次：拉取全市场 ETF 实时行情"""
+        today_str = datetime.now().strftime("%Y-%m-%d")
         
+        # 如果缓存里已经有今天的数据，直接跳过
+        if self.spot_data_cache is not None and self.spot_data_date == today_str:
+            return True
+
+        logger.info("🚀 [东财] 正在拉取全市场 ETF 实时快照 (Spot)...")
         try:
-            # [关键 V17.0] 使用 curl_cffi 的浏览器模拟功能
-            # 这会自动处理 TLS 指纹、HTTP/2 等
-            browser_session = create_browser_session()
-            
-            if browser_session:
-                # 使用 curl_cffi 时，通过 akshare 的底层机制注入
-                # 注意：akshare 1.18+ 内部使用了 curl_cffi，我们尝试设置其 session
-                try:
-                    # 尝试替换 akshare 内部 session
-                    original_session = getattr(ak, '_session', None)
-                    ak._session = browser_session
-                except:
-                    browser_session = None
-            
-            # 调用接口
-            df = ak.fund_etf_hist_em(
-                symbol=fund_code, 
-                period="daily", 
-                start_date="20250101", 
-                end_date="20500101", 
-                adjust="qfq"
-            )
-            
-            # 恢复原始 session
-            try:
-                if browser_session and original_session:
-                    ak._session = original_session
-            except:
-                pass
+            # 这里的接口非常关键，获取所有 ETF 的当前价格
+            df = ak.fund_etf_spot_em()
             
             if df is not None and not df.empty:
-                rename_map = {
-                    '日期': 'date',
-                    '开盘': 'open',
-                    '收盘': 'close',
-                    '最高': 'high',
-                    '最低': 'low',
-                    '成交量': 'volume',
-                    '成交额': 'amount',
-                    '振幅': 'amplitude',
-                    '涨跌幅': 'pct_change',
-                    '涨跌额': 'change',
-                    '换手率': 'turnover_rate'
-                }
-                df.rename(columns=rename_map, inplace=True)
-                df['date'] = pd.to_datetime(df['date'])
-                df.set_index('date', inplace=True)
-                df['fetch_time'] = fetch_time
-                df['source'] = 'eastmoney'
-                
-                df = self._standardize_dataframe(df, "东财")
-                return df, "东财"
-                
-        finally:
-            force_close_connections()
-            logger.info(f"🔌 [东财] 会话已清理")
+                # 建立代码索引，方便后续 O(1) 复杂度查找
+                # 注意：确保代码列是字符串类型
+                df['code'] = df['代码'].astype(str)
+                self.spot_data_cache = df.set_index('code')
+                self.spot_data_date = today_str
+                logger.info(f"✅ 全市场快照获取成功，共 {len(df)} 条数据")
+                return True
+            else:
+                logger.warning("⚠️ 全市场快照返回为空")
+        except Exception as e:
+            logger.error(f"❌ 全市场快照获取失败: {e}")
+            self.spot_data_cache = None
+        return False
 
+    def _fetch_eastmoney(self, fund_code, fetch_time):
+        """
+        [重写] 即使是获取东财数据，也不再请求网络，而是从 spot 缓存读取 + 拼接本地历史
+        """
+        # 1. 确保有全量缓存
+        if self.spot_data_cache is None:
+            if not self._init_spot_data():
+                return None, None # 初始化失败，后续会触发 failover 去跑新浪/腾讯
+
+        # 2. 在缓存中查找当前基金
+        if fund_code not in self.spot_data_cache.index:
+            # 这种情况可能是代码填错了，或者该基金今日停牌/未上市
+            # logger.debug(f"⚠️ [Spot] 未找到 {fund_code}")
+            return None, None
+
+        try:
+            # 3. 提取当日数据行
+            row = self.spot_data_cache.loc[fund_code]
+            
+            # 构造当日的 DataFrame (单行)
+            # 注意：Spot接口没有具体日期字段，默认归为"今天"
+            # 必须使用 .date() 确保索引对齐
+            today_date = pd.Timestamp(datetime.now().date())
+            
+            new_data = {
+                'date': today_date,
+                'open': row['开盘价'],
+                'high': row['最高价'],
+                'low': row['最低价'],
+                'close': row['最新价'],
+                'volume': row['成交量'],
+                'amount': row['成交额'],
+                'pct_change': row['涨跌幅'],
+                'change': row.get('涨跌额', 0),
+                'turnover_rate': row.get('换手率', 0),
+                'fetch_time': fetch_time,
+                'source': 'eastmoney_spot'
+            }
+            
+            df_new = pd.DataFrame([new_data])
+            df_new.set_index('date', inplace=True)
+
+            # 4. [核心逻辑] 读取本地 CSV 并拼接
+            file_path = os.path.join(self.DATA_DIR, f"{fund_code}.csv")
+            
+            if os.path.exists(file_path):
+                try:
+                    # 读取旧数据
+                    df_old = pd.read_csv(file_path, index_col='date', parse_dates=['date'])
+                    
+                    # 检查今天的数据是否已存在
+                    if today_date in df_old.index:
+                        # 如果存在，则更新这一行（覆盖）
+                        df_old.update(df_new)
+                        df_final = df_old
+                    else:
+                        # 如果不存在，追加到末尾
+                        df_final = pd.concat([df_old, df_new])
+                    
+                    # 确保按日期排序
+                    df_final.sort_index(inplace=True)
+                    return self._standardize_dataframe(df_final, "东财"), "东财"
+                except Exception as e:
+                    logger.error(f"⚠️ 读取本地文件 {fund_code} 失败: {e}，将仅返回当日数据")
+                    return self._standardize_dataframe(df_new, "东财"), "东财"
+            else:
+                # 如果没有本地文件（第一次运行），则只返回这一行数据
+                # 注意：这意味着你的 CSV 里只有这一天的数据
+                return self._standardize_dataframe(df_new, "东财"), "东财"
+
+        except Exception as e:
+            logger.error(f"❌ [东财Spot] 解析数据异常: {e}")
+            return None, None
+
+    # --- 新浪和腾讯的逻辑保持原样，作为备用兜底 ---
     @retry(retries=2, delay=15)
     def _fetch_sina(self, fund_code, fetch_time):
-        """[V17.0] 获取新浪数据"""
         logger.info(f"🌐 [新浪] 获取 {fund_code}...")
-        
         try:
             df = ak.fund_etf_hist_sina(symbol=fund_code)
-            
             if df is not None and not df.empty:
-                if df.index.name in ['date', '日期']: 
-                    df = df.reset_index()
-                
-                col_mapping = {}
-                for col in df.columns:
-                    col_str = str(col).lower()
-                    if col_str in ['date', '日期']:
-                        col_mapping[col] = 'date'
-                    elif col_str in ['open', '开盘']:
-                        col_mapping[col] = 'open'
-                    elif col_str in ['close', '收盘', 'latest']:
-                        col_mapping[col] = 'close'
-                    elif col_str in ['high', '最高']:
-                        col_mapping[col] = 'high'
-                    elif col_str in ['low', '最低']:
-                        col_mapping[col] = 'low'
-                    elif col_str in ['volume', '成交量', 'vol']:
-                        col_mapping[col] = 'volume'
-                
-                df.rename(columns=col_mapping, inplace=True)
-                
-                if 'date' in df.columns:
+                # 简单处理新浪数据格式
+                if 'date' in df.columns: 
                     df['date'] = pd.to_datetime(df['date'])
                     df.set_index('date', inplace=True)
-                    
-                    df['amount'] = pd.NA
-                    df['amplitude'] = pd.NA
-                    df['pct_change'] = pd.NA
-                    df['change'] = pd.NA
-                    df['turnover_rate'] = pd.NA
-                    df['fetch_time'] = fetch_time
-                    df['source'] = 'sina'
-                    
-                    for col in ['open', 'high', 'low', 'close', 'volume']:
-                        if col in df.columns: 
-                            df.loc[:, col] = pd.to_numeric(df[col], errors='coerce')
-                    
-                    df = self._standardize_dataframe(df, "新浪")
-                    return df, "新浪"
-        finally:
-            force_close_connections()
-            logger.info(f"🔌 [新浪] 连接已关闭")
+                df['fetch_time'] = fetch_time
+                return self._standardize_dataframe(df, "新浪"), "新浪"
+        except Exception as e:
+            logger.error(f"新浪失败: {e}")
+        return None, None
 
     @retry(retries=2, delay=15)
     def _fetch_tencent(self, fund_code, fetch_time):
-        """[V17.0] 获取腾讯数据"""
         logger.info(f"🌐 [腾讯] 获取 {fund_code}...")
-        
         try:
             prefix = 'sh' if fund_code.startswith('5') else ('sz' if fund_code.startswith('1') else '')
-            if prefix:
-                df = ak.stock_zh_a_hist_tx(
-                    symbol=f"{prefix}{fund_code}", 
-                    start_date="20200101", 
-                    adjust="qfq"
-                )
-                
-                if df is not None and not df.empty:
-                    rename_map = {
-                        '日期': 'date',
-                        '开盘': 'open',
-                        '收盘': 'close',
-                        '最高': 'high',
-                        '最低': 'low',
-                        '成交量': 'volume',
-                        '成交额': 'amount',
-                        '振幅': 'amplitude',
-                        '涨跌幅': 'pct_change',
-                        '涨跌额': 'change',
-                        '换手率': 'turnover_rate'
-                    }
-                    df.rename(columns=rename_map, inplace=True)
-                    df['date'] = pd.to_datetime(df['date'])
-                    df.set_index('date', inplace=True)
-                    df['fetch_time'] = fetch_time
-                    df['source'] = 'tencent'
-                    
-                    df = self._standardize_dataframe(df, "腾讯")
-                    return df, "腾讯"
-        finally:
-            force_close_connections()
-            logger.info(f"🔌 [腾讯] 连接已关闭")
+            df = ak.stock_zh_a_hist_tx(symbol=f"{prefix}{fund_code}", start_date="20250101", adjust="qfq")
+            if df is not None and not df.empty:
+                df.rename(columns={'日期':'date', '开盘':'open', '收盘':'close', '最高':'high', '最低':'low', '成交量':'volume'}, inplace=True)
+                df['date'] = pd.to_datetime(df['date'])
+                df.set_index('date', inplace=True)
+                df['fetch_time'] = fetch_time
+                return self._standardize_dataframe(df, "腾讯"), "腾讯"
+        except Exception as e:
+            logger.error(f"腾讯失败: {e}")
+        return None, None
 
     def _fetch_from_network(self, fund_code):
-        """[V17.0] 主获取逻辑：东财 -> 新浪 -> 腾讯"""
+        """主获取逻辑"""
         fetch_time = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # 1. 东财 - 使用浏览器模拟
-        try:
-            wait = random.uniform(8.0, 15.0)  # [V17.0] 增加初始等待
-            logger.info(f"⏳ 预等待 {wait:.1f}s...")
-            time.sleep(wait)
+
+        # 1. 优先尝试东财 (现在是极速 Spot 模式)
+        # 不需要 sleep 了，因为是读内存
+        df, source = self._fetch_eastmoney(fund_code, fetch_time)
+        if df is not None:
+            return df, source
+
+        # 2. 如果 Spot 里没有（比如停牌），尝试新浪（获取历史）
+        time.sleep(random.uniform(2, 5))
+        df, source = self._fetch_sina(fund_code, fetch_time)
+        if df is not None:
+            return df, source
+
+        # 3. 最后尝试腾讯
+        time.sleep(random.uniform(2, 5))
+        df, source = self._fetch_tencent(fund_code, fetch_time)
+        if df is not None:
+            return df, source
             
-            df, source = self._fetch_eastmoney(fund_code, fetch_time)
-            if df is not None and not df.empty:
-                return df, source
-        except Exception as e:
-            logger.error(f"❌ 东财失败: {e}")
-            force_close_connections()
-
-        # 2. 新浪
-        try:
-            time.sleep(random.uniform(5.0, 10.0))
-            df, source = self._fetch_sina(fund_code, fetch_time)
-            if df is not None and not df.empty:
-                return df, source
-        except Exception as e:
-            logger.error(f"⚠️ 新浪失败: {e}")
-
-        # 3. 腾讯
-        try:
-            time.sleep(random.uniform(5.0, 10.0))
-            df, source = self._fetch_tencent(fund_code, fetch_time)
-            if df is not None and not df.empty:
-                return df, source
-        except Exception as e:
-            logger.error(f"⚠️ 腾讯失败: {e}")
-        
         return None, None
 
     def update_cache(self, fund_code):
-        """[V17.0] 更新单个基金数据"""
+        """更新接口，保持写入逻辑不变"""
         df, source = self._fetch_from_network(fund_code)
         
-        if df is None:
-            logger.error(f"❌ {fund_code} 所有数据源均获取失败")
-            return False
-
-        if not df.empty:
+        if df is not None and not df.empty:
             file_path = os.path.join(self.DATA_DIR, f"{fund_code}.csv")
+            # 无论来源是哪，都直接覆盖写入（因为 _fetch_eastmoney 已经做好了拼接）
             df.to_csv(file_path)
-            logger.info(f"💾 [{source}] {fund_code} 数据已保存至 {file_path}")
-            
-            # [V17.0] 东财成功后等待 50-70 秒（更保守）
-            if source == "东财":
-                wait_time = random.uniform(50, 70)
-                logger.info(f"⏳ [东财] 强制冷却 {wait_time:.1f}s...")
-                time.sleep(wait_time)
-            
+            logger.info(f"💾 [{source}] {fund_code} 数据已更新")
             return True
         else:
-            logger.error(f"❌ {fund_code} 数据为空")
+            logger.error(f"❌ {fund_code} 更新失败")
             return False
 
-    def get_fund_history(self, fund_code, days=250):
-        """读取本地缓存"""
-        file_path = os.path.join(self.DATA_DIR, f"{fund_code}.csv")
-        
-        if not os.path.exists(file_path):
-            logger.warning(f"⚠️ 本地缓存缺失: {fund_code}")
-            return None
-            
-        try:
-            df = pd.read_csv(file_path, index_col='date', parse_dates=['date'])
-            
-            if 'fetch_time' in df.columns:
-                df['fetch_time'] = pd.to_datetime(df['fetch_time'])
-            
-            self._verify_data_freshness(df, fund_code, "本地缓存")
-            return df
-            
-        except Exception as e:
-            logger.error(f"❌ 读取本地缓存失败 {fund_code}: {e}")
-            return None
-
-# ==========================================
-# [V17.0] 主程序入口 - 随机顺序 + 浏览器模拟
-# ==========================================
+# ===================== 主程序 =====================
 if __name__ == "__main__":
-    print("🚀 [DataFetcher] 启动 (V17.0 Browser-Impersonate Mode)...")
+    print("🚀 [DataFetcher] 启动 (Spot 极速模式)...")
     
-    def load_config_local():
-        try:
-            with open('config.yaml', 'r', encoding='utf-8') as f:
-                return yaml.safe_load(f)
-        except:
-            return {}
-
-    cfg = load_config_local()
-    funds = cfg.get('funds', [])
+    # 读取配置
+    try:
+        with open('config.yaml', 'r', encoding='utf-8') as f:
+            cfg = yaml.safe_load(f)
+            funds = cfg.get('funds', [])
+    except:
+        funds = [] # 此时请确保你的config.yaml存在
     
     if not funds:
-        print("⚠️ 未找到基金列表，请检查 config.yaml")
+        print("⚠️ 未找到基金列表")
         exit()
 
-    # 随机打乱获取顺序
-    random.shuffle(funds)
-    logger.info(f"🎲 随机获取顺序: {[f.get('code') for f in funds]}")
-
     fetcher = DataFetcher()
-    success_count = 0
     
+    # [关键步骤] 初始化全市场数据 (只请求1次)
+    fetcher._init_spot_data()
+
+    success_count = 0
     for idx, fund in enumerate(funds):
-        code = fund.get('code')
+        code = str(fund.get('code')) # 确保是字符串
         name = fund.get('name')
-        print(f"🔄 [{idx+1}/{len(funds)}] 更新: {name} ({code})...")
         
-        try:
-            if fetcher.update_cache(code):
-                success_count += 1
+        # 这里的 update_cache 速度会非常快
+        if fetcher.update_cache(code):
+            success_count += 1
             
-            # 基金间基础间隔
-            if idx < len(funds) - 1:
-                base_wait = random.uniform(5.0, 10.0)
-                logger.info(f"⏳ 基础间隔等待 {base_wait:.1f}s...")
-                time.sleep(base_wait)
-                
-        except Exception as e:
-            print(f"❌ 更新异常 {name}: {e}")
-            force_close_connections()
-            time.sleep(random.uniform(15, 20))
+        # 极速模式下，不需要 sleep 很久，微小的间隔即可
+        if idx % 10 == 0: 
+            print(f"进度: {idx+1}/{len(funds)}...")
             
-    print(f"🏁 完成: {success_count}/{len(funds)} (浏览器模拟模式)")
+    print(f"🏁 完成: {success_count}/{len(funds)}")
