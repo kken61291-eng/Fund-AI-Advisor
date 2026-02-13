@@ -1,5 +1,4 @@
 requests
-pandas
 numpy
 pyyaml
 # [关键] 不要写 ==1.18.22，直接写库名，让它能装到最新的
@@ -17,3 +16,6 @@ pytz
 # [关键] 财联社浏览器抓取必须的库
 selenium
 webdriver-manager
+curl_cffi>=0.5.10
+pandas>=2.0.0
+pyyaml>=6.0
