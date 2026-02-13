@@ -181,7 +181,7 @@ def main():
     try: analyst = NewsAnalyst()
     except: analyst = None
 
-    logger.info("🚀 启动 v19.6 认知对抗系统 (Cognitive Adversarial Model)...")
+    logger.info("🚀 启动 v19.7 认知对抗系统 (Cognitive Adversarial Model)...")
 
     # 1. 环境扫描
     market_context = {"news_summary": "无新闻", "net_flow": 0}
@@ -190,10 +190,13 @@ def main():
     if analyst:
         logger.info("📡 正在进行宏观扫描与资金流检测...")
         news_text = analyst.get_market_context()
-        vitality = scanner.get_market_vitality()
+        
+        # 🟢 [修改] 资金流检测改用 fetcher 的 API 获取 (替换原 scanner.get_market_vitality)
+        net_flow_val = fetcher.get_market_net_flow()
+        
         market_context = {
             "news_summary": news_text,
-            "net_flow": vitality.get('net_flow', 0)
+            "net_flow": net_flow_val
         }
         all_news_seen = [line.strip() for line in news_text.split('\n') if line.strip().startswith('[')]
         logger.info(f"🌍 市场状态: 资金流 {market_context['net_flow']} 亿")
@@ -341,7 +344,7 @@ def main():
     html = render_html_report_v19(all_news_seen, final_results, cio_html, "") 
     
     subject_prefix = "🚧 [测试] " if TEST_MODE else "🕊️ "
-    send_email(f"{subject_prefix}鹊知风 v19.6 认知对抗报告", html)
+    send_email(f"{subject_prefix}鹊知风 v19.7 认知对抗报告", html)
     
     logger.info("✅ 运行结束，邮件已发送。")
 
