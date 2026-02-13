@@ -5,33 +5,42 @@ import os
 import yaml
 import logging
 import gc
+import sys
 from datetime import datetime, time as dt_time
-from typing import Optional, List
+from typing import Optional, List, Dict
 
+# 检查依赖
 try:
     from curl_cffi import requests as cffi_requests
-    from curl_cffi.requests.exceptions import RequestException
 except ImportError:
-    raise ImportError("请先安装 curl_cffi: pip install curl_cffi>=0.5.10")
+    print("❌ 请先安装依赖: pip install curl_cffi pandas pyyaml")
+    sys.exit(1)
 
-# ===================== 工具函数 =====================
+# ===================== 配置 =====================
 def get_beijing_time():
     from datetime import timezone, timedelta
     return datetime.now(timezone(timedelta(hours=8)))
 
-logger = logging.getLogger(__name__)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
+logger = logging.getLogger(__name__)
 
-# ===================== DataFetcher 类 =====================
+def get_proxy() -> Optional[Dict[str, str]]:
+    """
+    获取代理配置 - 硬编码版本
+    """
+    # [硬编码代理] 格式: http://user:pass@host:port
+    proxy = "http://typembrv:kx2q7wpv1dd4@31.59.20.176:6754"
+    
+    logger.info(f"🌐 使用代理: http://***@31.59.20.176:6754")
+    return {"http": proxy, "https": proxy}
+
+# ===================== DataFetcher =====================
 class DataFetcher:
-    UNIFIED_COLUMNS = [
-        'date', 'open', 'high', 'low', 'close', 'volume',
-        'amount', 'amplitude', 'pct_change', 'change', 'turnover_rate',
-        'fetch_time'
-    ]
+    UNIFIED_COLUMNS = ['date', 'open', 'high', 'low', 'close', 'volume',
+                       'amount', 'amplitude', 'pct_change', 'change', 'turnover_rate', 'fetch_time']
     
     def __init__(self):
         self.DATA_DIR = "data_cache"
@@ -39,20 +48,32 @@ class DataFetcher:
         
         self.spot_data_cache: Optional[pd.DataFrame] = None
         self.spot_data_date: Optional[str] = None
+        self.session: Optional[cffi_requests.Session] = None
+        self.proxy = get_proxy()
         
-        # 每次请求后重新创建 session，避免连接复用被追踪
-        self.session = None
+        # 统计
+        self.total_funds = 0
+        self.success_count = 0
 
     def _create_session(self):
-        """创建新的 session"""
+        """创建新 session"""
         if self.session:
             try:
                 self.session.close()
             except:
                 pass
-        self.session = cffi_requests.Session(impersonate="chrome120")
-        # 随机等待，模拟人类操作
-        time.sleep(random.uniform(3, 8))
+        
+        try:
+            self.session = cffi_requests.Session(
+                impersonate="chrome120",
+                proxies=self.proxy,
+                timeout=30
+            )
+            # 随机延迟，模拟人类
+            time.sleep(random.uniform(1, 3))
+        except Exception as e:
+            logger.error(f"❌ 创建 session 失败: {e}")
+            raise
 
     def _close_session(self):
         if self.session:
@@ -62,292 +83,246 @@ class DataFetcher:
                 pass
             self.session = None
             gc.collect()
-            time.sleep(1)
 
-    def _standardize_dataframe(self, df: pd.DataFrame, source_name: str) -> pd.DataFrame:
-        if df is None or df.empty:
-            return df
-        
-        df = df.copy()
-        for col in self.UNIFIED_COLUMNS:
-            if col not in df.columns:
-                df[col] = pd.NA
-        
-        df = df[self.UNIFIED_COLUMNS]
-        numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'amount', 
-                       'amplitude', 'pct_change', 'change', 'turnover_rate']
-        for col in numeric_cols:
-            if col in df.columns:
-                df.loc[:, col] = pd.to_numeric(df[col], errors='coerce')
-        return df
-
-    def _fetch_single_page(self, pn: int, pz: int = 100, max_retries: int = 3) -> Optional[List[dict]]:
-        """获取单页数据，带重试"""
-        url = "https://push2.eastmoney.com/api/qt/clist/get"
-        
-        params = {
-            "pn": str(pn),
-            "pz": str(pz),
-            "po": "1",
-            "np": "1",
-            "ut": "bd1d9ddb04089700cf9c27f6f7426281",
-            "fltt": "2",
-            "invt": "2",
-            "fid": "f3",
-            "fs": "b:MK0021,b:MK0022,b:MK0023,b:MK0024",
-            "fields": "f12,f14,f2,f3,f4,f5,f6,f7,f8,f15,f16,f17,f18",
-            "_": str(int(time.time() * 1000))
-        }
-
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": "http://quote.eastmoney.com/",
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-            "X-Requested-With": "XMLHttpRequest",
-            "Connection": "close",  # 短连接
-        }
-
+    def _safe_request(self, url: str, params: dict, headers: dict, max_retries: int = 3) -> Optional[dict]:
+        """带重试的安全请求"""
         for attempt in range(max_retries):
             try:
                 if not self.session:
                     self._create_session()
                 
-                r = self.session.get(url, params=params, headers=headers, timeout=20)
-                
-                if r.status_code != 200:
-                    logger.error(f"❌ 页 {pn} 状态码: {r.status_code}")
-                    if attempt < max_retries - 1:
-                        self._close_session()
-                        time.sleep(random.uniform(5, 10))
-                        continue
-                    return None
-
-                data_json = r.json()
-                
-                if not data_json or data_json.get('rc') != 0:
-                    logger.error(f"❌ 页 {pn} API错误: {data_json.get('rt', '未知')}")
-                    return None
-                    
-                if 'data' not in data_json or 'diff' not in data_json['data']:
-                    return None
-                    
-                return data_json['data']['diff']
+                r = self.session.get(url, params=params, headers=headers)
+                r.raise_for_status()
+                return r.json()
                 
             except Exception as e:
-                logger.warning(f"⚠️ 页 {pn} 第 {attempt+1} 次尝试失败: {e}")
+                err_msg = str(e)[:100]
+                logger.warning(f"⚠️ 请求失败 ({attempt+1}/{max_retries}): {err_msg}")
                 self._close_session()
+                
                 if attempt < max_retries - 1:
-                    time.sleep(random.uniform(5, 10))
+                    wait = random.uniform(3, 8) * (attempt + 1)
+                    logger.info(f"⏳ 等待 {wait:.1f}s 后重试...")
+                    time.sleep(wait)
                 else:
-                    logger.error(f"❌ 页 {pn} 最终失败")
+                    logger.error(f"❌ 请求最终失败")
                     return None
         
         return None
 
-    def _fetch_eastmoney_raw_spot(self) -> Optional[pd.DataFrame]:
-        """
-        [V20.0] 分页获取所有 ETF 数据，更保守的策略
-        """
-        logger.info("🚀 [黑科技] 正在分页获取东财全市场 ETF 数据...")
-        logger.info("⏳ 初始冷却 10-15 秒...")
-        time.sleep(random.uniform(10, 15))  # 初始长延迟
+    def fetch_all_etfs(self) -> Optional[pd.DataFrame]:
+        """获取全市场 ETF 数据"""
+        url = "https://push2.eastmoney.com/api/qt/clist/get"
         
         all_data = []
         page = 1
-        max_pages = 50  # 降低上限
         
-        while page <= max_pages:
+        while page <= 200:  # 安全上限
             logger.info(f"📄 获取第 {page} 页...")
-            page_data = self._fetch_single_page(page, pz=100)
             
-            if not page_data:
+            params = {
+                "pn": str(page),
+                "pz": "100",
+                "po": "1",
+                "np": "1",
+                "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+                "fltt": "2",
+                "invt": "2",
+                "fid": "f3",
+                "fs": "b:MK0021,b:MK0022,b:MK0023,b:MK0024",
+                "fields": "f12,f14,f2,f3,f4,f5,f6,f7,f8,f15,f16,f17,f18",
+                "_": str(int(time.time() * 1000))
+            }
+            
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": "http://quote.eastmoney.com/",
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+            }
+            
+            data = self._safe_request(url, params, headers)
+            
+            if not data or data.get('rc') != 0 or 'data' not in data or 'diff' not in data['data']:
                 if page == 1:
-                    logger.error("❌ 第一页就失败，可能 IP 被临时封禁")
+                    logger.error("❌ 第一页获取失败，检查代理配置")
                     return None
                 break
-                
-            all_data.extend(page_data)
-            logger.info(f"   本页 {len(page_data)} 条，累计 {len(all_data)} 条")
             
-            if len(page_data) < 100:
+            items = data['data']['diff']
+            if not items:
+                break
+                
+            all_data.extend(items)
+            logger.info(f"   ✅ 本页 {len(items)} 条，累计 {len(all_data)} 条")
+            
+            if len(items) < 100:
                 break
             
-            # 翻页前长延迟
             page += 1
-            if page <= max_pages:
-                delay = random.uniform(8, 15)  # 翻页延迟 8-15 秒
-                logger.info(f"   等待 {delay:.1f} 秒...")
-                time.sleep(delay)
+            time.sleep(random.uniform(2, 5))
         
         self._close_session()
         
         if not all_data:
-            logger.error("❌ 未获取到任何数据")
             return None
-            
-        logger.info(f"✅ 共获取 {len(all_data)} 条 ETF 数据")
         
+        # 处理数据
         df = pd.DataFrame(all_data)
         
         rename_map = {
-            'f12': 'code',
-            'f14': 'name',
-            'f2': 'close',
-            'f3': 'pct_change',
-            'f4': 'change',
-            'f5': 'volume',
-            'f6': 'amount',
-            'f7': 'amplitude',
-            'f8': 'turnover_rate',
-            'f17': 'open',
-            'f15': 'high',
-            'f16': 'low',
-            'f18': 'pre_close',
+            'f12': 'code', 'f14': 'name', 'f2': 'close', 'f3': 'pct_change',
+            'f4': 'change', 'f5': 'volume', 'f6': 'amount', 'f7': 'amplitude',
+            'f8': 'turnover_rate', 'f17': 'open', 'f15': 'high', 'f16': 'low',
         }
         
-        existing_cols = {k: v for k, v in rename_map.items() if k in df.columns}
-        df.rename(columns=existing_cols, inplace=True)
+        df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns}, inplace=True)
         
         # 清理代码格式
-        df['code'] = df['code'].astype(str).str.strip().str.lower()
-        df['code'] = df['code'].str.replace(r'^(sh|sz)', '', regex=True)
-        
+        df['code'] = df['code'].astype(str).str.strip().str.lower().str.replace(r'^(sh|sz)', '', regex=True)
         df = df.drop_duplicates(subset=['code'], keep='first')
         
-        logger.info(f"✅ 去重后共 {len(df)} 条")
+        logger.info(f"✅ 共获取 {len(df)} 只 ETF")
         return df.set_index('code')
 
-    def _init_spot_data(self) -> bool:
-        today_str = get_beijing_time().strftime("%Y-%m-%d")
+    def init_spot_data(self) -> bool:
+        """初始化数据缓存"""
+        today = get_beijing_time().strftime("%Y-%m-%d")
         
-        if self.spot_data_cache is not None and self.spot_data_date == today_str:
-            logger.info("✅ 使用今日已缓存的 Spot 数据")
+        if self.spot_data_cache is not None and self.spot_data_date == today:
+            logger.info("✅ 使用缓存数据")
             return True
-
-        df = self._fetch_eastmoney_raw_spot()
+        
+        df = self.fetch_all_etfs()
         if df is not None and not df.empty:
             self.spot_data_cache = df
-            self.spot_data_date = today_str
+            self.spot_data_date = today
             return True
+        
         return False
 
-    def _safe_float(self, val, default: float = 0.0) -> float:
-        if val is None or val == '-' or val == '':
-            return default
-        try:
-            return float(val)
-        except (ValueError, TypeError):
-            return default
-
-    def update_cache(self, fund_code: str) -> bool:
-        fetch_time = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
-        
+    def update_single(self, fund_code: str) -> bool:
+        """更新单个基金"""
         if self.spot_data_cache is None:
-            if not self._init_spot_data():
+            if not self.init_spot_data():
                 return False
-
-        clean_code = str(fund_code).strip().lower()
-        clean_code = clean_code.replace('sh', '').replace('sz', '')
         
-        if clean_code not in self.spot_data_cache.index:
+        code = str(fund_code).strip().lower().replace('sh', '').replace('sz', '')
+        
+        if code not in self.spot_data_cache.index:
             logger.warning(f"⚠️ 未找到 {fund_code}")
             return False
-
+        
         try:
-            row = self.spot_data_cache.loc[clean_code]
-            today_date = pd.Timestamp(get_beijing_time().date())
+            row = self.spot_data_cache.loc[code]
+            today = pd.Timestamp(get_beijing_time().date())
+            
+            def to_float(x):
+                try:
+                    return float(x) if x and x != '-' else 0.0
+                except:
+                    return 0.0
             
             new_data = {
-                'date': today_date,
-                'open': self._safe_float(row.get('open')),
-                'high': self._safe_float(row.get('high')),
-                'low': self._safe_float(row.get('low')),
-                'close': self._safe_float(row.get('close')),
-                'volume': self._safe_float(row.get('volume')),
-                'amount': self._safe_float(row.get('amount')),
-                'amplitude': self._safe_float(row.get('amplitude')),
-                'pct_change': self._safe_float(row.get('pct_change')),
-                'change': self._safe_float(row.get('change')),
-                'turnover_rate': self._safe_float(row.get('turnover_rate')),
-                'fetch_time': fetch_time,
+                'date': today,
+                'open': to_float(row.get('open')),
+                'high': to_float(row.get('high')),
+                'low': to_float(row.get('low')),
+                'close': to_float(row.get('close')),
+                'volume': to_float(row.get('volume')),
+                'amount': to_float(row.get('amount')),
+                'amplitude': to_float(row.get('amplitude')),
+                'pct_change': to_float(row.get('pct_change')),
+                'change': to_float(row.get('change')),
+                'turnover_rate': to_float(row.get('turnover_rate')),
+                'fetch_time': get_beijing_time().strftime("%Y-%m-%d %H:%M:%S"),
                 'source': 'eastmoney_spot'
             }
             
             df_new = pd.DataFrame([new_data])
             df_new.set_index('date', inplace=True)
-
-            file_path = os.path.join(self.DATA_DIR, f"{fund_code}.csv")
             
-            if os.path.exists(file_path):
+            # 合并历史数据
+            path = os.path.join(self.DATA_DIR, f"{fund_code}.csv")
+            if os.path.exists(path):
                 try:
-                    df_old = pd.read_csv(file_path, index_col='date', parse_dates=['date'])
-                    
-                    if today_date in df_old.index:
+                    df_old = pd.read_csv(path, index_col='date', parse_dates=['date'])
+                    if today in df_old.index:
                         df_old.update(df_new)
                         df_final = df_old
                     else:
                         df_final = pd.concat([df_old, df_new])
-                    
-                    df_final = df_final[~df_final.index.duplicated(keep='last')]
-                    df_final.sort_index(inplace=True)
-                    
-                except Exception as e:
-                    logger.warning(f"⚠️ 读取历史失败: {e}")
+                    df_final = df_final[~df_final.index.duplicated(keep='last')].sort_index()
+                except:
                     df_final = df_new
             else:
                 df_final = df_new
-
-            final_df = self._standardize_dataframe(df_final, "东财")
-            final_df.to_csv(file_path)
             
-            logger.info(f"💾 {fund_code} 更新成功 (收盘: {new_data['close']:.3f})")
+            # 标准化并保存
+            df_final = df_final.reindex(columns=self.UNIFIED_COLUMNS)
+            for col in ['open', 'high', 'low', 'close', 'volume', 'amount', 
+                       'amplitude', 'pct_change', 'change', 'turnover_rate']:
+                df_final[col] = pd.to_numeric(df_final[col], errors='coerce')
+            
+            df_final.to_csv(path)
+            logger.info(f"💾 {fund_code} 成功 (收盘: {new_data['close']:.3f})")
             return True
-
+            
         except Exception as e:
-            logger.error(f"❌ 处理异常 {fund_code}: {e}")
+            logger.error(f"❌ {fund_code} 处理失败: {e}")
             return False
 
-# ===================== 主程序 =====================
+    def run(self, funds: List[dict]):
+        """批量运行"""
+        self.total_funds = len(funds)
+        self.success_count = 0
+        
+        if not self.init_spot_data():
+            logger.error("❌ 初始化失败，退出")
+            return 0
+        
+        for i, fund in enumerate(funds, 1):
+            code = str(fund.get('code', '')).strip()
+            name = fund.get('name', 'Unknown')
+            
+            if not code or len(code) < 6:
+                continue
+            
+            logger.info(f"🔄 [{i}/{self.total_funds}] {name} ({code})")
+            
+            if self.update_single(code):
+                self.success_count += 1
+            
+            if i % 10 == 0 or i == self.total_funds:
+                logger.info(f"📊 进度: {i}/{self.total_funds}, 成功: {self.success_count}")
+        
+        return self.success_count
+
+# ===================== 主入口 =====================
 if __name__ == "__main__":
-    print("🚀 [DataFetcher] 启动 (V20.0 超保守模式)...")
+    print("=" * 50)
+    print("🚀 DataFetcher V21.1 - 东财 ETF 数据获取")
+    print("🌐 代理: 31.59.20.176:6754")
+    print("=" * 50)
     
+    # 加载配置
     try:
         with open('config.yaml', 'r', encoding='utf-8') as f:
             cfg = yaml.safe_load(f)
             funds = cfg.get('funds', [])
     except Exception as e:
-        logger.error(f"配置错误: {e}")
+        logger.error(f"读取 config.yaml 失败: {e}")
         funds = []
     
     if not funds:
-        print("⚠️ 未找到基金列表")
-        exit(1)
-
+        print("❌ 未找到基金列表，请检查 config.yaml")
+        sys.exit(1)
+    
+    # 运行
     fetcher = DataFetcher()
+    success = fetcher.run(funds)
     
-    if not fetcher._init_spot_data():
-        logger.error("❌ 初始化失败，尝试使用备用方案...")
-        # 这里可以添加备用数据源逻辑
-        exit(1)
-
-    success_count = 0
-    total = len(funds)
+    print(f"\n{'=' * 50}")
+    print(f"🏁 完成: {success}/{len(funds)} ({success/len(funds)*100:.1f}%)")
+    print(f"{'=' * 50}")
     
-    for idx, fund in enumerate(funds):
-        code = str(fund.get('code', '')).strip()
-        name = fund.get('name', 'Unknown')
-        
-        if not code:
-            continue
-            
-        logger.info(f"🔄 [{idx+1}/{total}] {name} ({code})")
-        
-        if fetcher.update_cache(code):
-            success_count += 1
-            
-        if (idx + 1) % 10 == 0 or idx == total - 1:
-            logger.info(f"📊 进度: {idx+1}/{total}, 成功: {success_count}")
-            
-    logger.info(f"🏁 完成: {success_count}/{total}")
-    print(f"🏁 行情更新完成: {success_count}/{total}")
+    sys.exit(0 if success > 0 else 1)
