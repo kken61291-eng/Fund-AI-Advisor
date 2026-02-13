@@ -1,8 +1,10 @@
 requests
 numpy
-pyyaml
-# [关键] 不要写 ==1.18.22，直接写库名，让它能装到最新的
+pyyaml>=6.0
+pandas>=2.0.0
+# [核心数据源] 保持最新以修复接口变动
 akshare
+# [辅助库]
 scikit-learn
 schedule
 retrying
@@ -13,9 +15,8 @@ openpyxl
 jinja2
 ta>=0.10.0
 pytz
-# [关键] 财联社浏览器抓取必须的库
-selenium
+# [浏览器抓取核心] 用于财联社
+selenium>=4.0.0
 webdriver-manager
+# [API防反爬核心] 用于东财
 curl_cffi>=0.5.10
-pandas>=2.0.0
-pyyaml>=6.0
