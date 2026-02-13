@@ -7,11 +7,13 @@ import logging
 import gc
 import sys
 from datetime import datetime, time as dt_time
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
+from dataclasses import dataclass
 
 # 检查依赖
 try:
     from curl_cffi import requests as cffi_requests
+    from curl_cffi.requests.exceptions import RequestException, ProxyError
 except ImportError:
     print("❌ 请先安装依赖: pip install curl_cffi pandas pyyaml")
     sys.exit(1)
@@ -27,15 +29,84 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def get_proxy() -> Optional[Dict[str, str]]:
-    """
-    获取代理配置 - 硬编码版本
-    """
-    # [硬编码代理] 格式: http://user:pass@host:port
-    proxy = "http://typembrv:kx2q7wpv1dd4@31.59.20.176:6754"
+@dataclass
+class Proxy:
+    """代理配置"""
+    host: str
+    port: int
+    user: str
+    password: str
+    location: str = ""
     
-    logger.info(f"🌐 使用代理: http://***@31.59.20.176:6754")
-    return {"http": proxy, "https": proxy}
+    def __str__(self):
+        return f"http://{self.user}:{self.password}@{self.host}:{self.port}"
+    
+    def to_dict(self):
+        url = str(self)
+        return {"http": url, "https": url}
+
+# [代理池] 多个代理配置，按优先级排序
+PROXY_POOL = [
+    Proxy("31.59.20.176", 6754, "typembrv", "kx2q7wpv1dd4", "🇬🇧伦敦"),
+    Proxy("23.95.150.145", 6114, "typembrv", "kx2q7wpv1dd4", "🇬🇧伦敦"),
+    Proxy("198.23.239.134", 6540, "typembrv", "kx2q7wpv1dd4", "🇺🇸水牛"),
+    Proxy("45.38.107.97", 6014, "typembrv", "kx2q7wpv1dd4", "🇺🇸水牛"),
+    Proxy("107.172.163.27", 6543, "typembrv", "kx2q7wpv1dd4", "🇬🇧伦敦"),
+    Proxy("198.105.121.200", 6462, "typembrv", "kx2q7wpv1dd4", "🇺🇸布卢明戴尔"),
+    Proxy("64.137.96.74", 6641, "typembrv", "kx2q7wpv1dd4", "🇬🇧伦敦金融城"),
+    Proxy("216.10.27.159", 6837, "typembrv", "kx2q7wpv1dd4", "🇪🇸马德里"),
+    Proxy("23.26.71.145", 5628, "typembrv", "kx2q7wpv1dd4", "🇺🇸达拉斯"),
+    Proxy("23.229.19.94", 8689, "typembrv", "kx2q7wpv1dd4", "🇺🇸奥勒姆"),
+]
+
+class ProxyManager:
+    """代理管理器：自动轮询和故障转移"""
+    
+    def __init__(self, proxies: List[Proxy]):
+        self.proxies = proxies
+        self.current_index = 0
+        self.failed_proxies: set = set()  # 记录失败的代理
+        self.last_used: Dict[str, float] = {}  # 记录上次使用时间
+        
+    def get_next_proxy(self) -> Optional[Proxy]:
+        """获取下一个可用代理"""
+        attempts = 0
+        while attempts < len(self.proxies):
+            proxy = self.proxies[self.current_index]
+            self.current_index = (self.current_index + 1) % len(self.proxies)
+            
+            # 跳过已失败的代理
+            if proxy.host in self.failed_proxies:
+                attempts += 1
+                continue
+            
+            # 检查冷却时间（同一代理至少间隔 2 秒）
+            last_time = self.last_used.get(proxy.host, 0)
+            if time.time() - last_time < 2:
+                time.sleep(2)
+            
+            self.last_used[proxy.host] = time.time()
+            return proxy
+            
+            attempts += 1
+        
+        # 所有代理都失败了，重置并再试一次
+        if self.failed_proxies:
+            logger.warning("🔄 所有代理都失败过，重置失败列表重试...")
+            self.failed_proxies.clear()
+            return self.get_next_proxy()
+        
+        return None
+    
+    def mark_failed(self, proxy: Proxy):
+        """标记代理为失败"""
+        logger.warning(f"❌ 代理 {proxy.location} {proxy.host} 标记为失败")
+        self.failed_proxies.add(proxy.host)
+        self._close_session()
+    
+    def _close_session(self):
+        """清理 session"""
+        gc.collect()
 
 # ===================== DataFetcher =====================
 class DataFetcher:
@@ -49,14 +120,15 @@ class DataFetcher:
         self.spot_data_cache: Optional[pd.DataFrame] = None
         self.spot_data_date: Optional[str] = None
         self.session: Optional[cffi_requests.Session] = None
-        self.proxy = get_proxy()
+        self.proxy_manager = ProxyManager(PROXY_POOL)
+        self.current_proxy: Optional[Proxy] = None
         
         # 统计
         self.total_funds = 0
         self.success_count = 0
 
-    def _create_session(self):
-        """创建新 session"""
+    def _create_session(self, proxy: Proxy):
+        """使用指定代理创建 session"""
         if self.session:
             try:
                 self.session.close()
@@ -64,13 +136,14 @@ class DataFetcher:
                 pass
         
         try:
+            self.current_proxy = proxy
             self.session = cffi_requests.Session(
                 impersonate="chrome120",
-                proxies=self.proxy,
+                proxies=proxy.to_dict(),
                 timeout=30
             )
-            # 随机延迟，模拟人类
-            time.sleep(random.uniform(1, 3))
+            logger.info(f"🌐 使用代理: {proxy.location} {proxy.host}:{proxy.port}")
+            time.sleep(random.uniform(0.5, 2))
         except Exception as e:
             logger.error(f"❌ 创建 session 失败: {e}")
             raise
@@ -84,30 +157,50 @@ class DataFetcher:
             self.session = None
             gc.collect()
 
-    def _safe_request(self, url: str, params: dict, headers: dict, max_retries: int = 3) -> Optional[dict]:
-        """带重试的安全请求"""
-        for attempt in range(max_retries):
-            try:
-                if not self.session:
-                    self._create_session()
-                
-                r = self.session.get(url, params=params, headers=headers)
-                r.raise_for_status()
-                return r.json()
-                
-            except Exception as e:
-                err_msg = str(e)[:100]
-                logger.warning(f"⚠️ 请求失败 ({attempt+1}/{max_retries}): {err_msg}")
-                self._close_session()
-                
-                if attempt < max_retries - 1:
-                    wait = random.uniform(3, 8) * (attempt + 1)
-                    logger.info(f"⏳ 等待 {wait:.1f}s 后重试...")
-                    time.sleep(wait)
-                else:
-                    logger.error(f"❌ 请求最终失败")
-                    return None
+    def _safe_request(self, url: str, params: dict, headers: dict, max_proxy_retries: int = 3) -> Optional[dict]:
+        """
+        带代理切换的重试机制
+        每个代理最多试 2 次，总共最多换 max_proxy_retries 个代理
+        """
+        proxy_attempts = 0
         
+        while proxy_attempts < max_proxy_retries:
+            # 获取新代理
+            proxy = self.proxy_manager.get_next_proxy()
+            if not proxy:
+                logger.error("❌ 没有可用代理")
+                return None
+            
+            # 用此代理创建 session
+            self._create_session(proxy)
+            
+            # 此代理重试 2 次
+            for attempt in range(2):
+                try:
+                    r = self.session.get(url, params=params, headers=headers, timeout=25)
+                    r.raise_for_status()
+                    return r.json()
+                    
+                except ProxyError as e:
+                    logger.warning(f"⚠️ 代理错误: {str(e)[:80]}")
+                    break  # 换代理
+                    
+                except Exception as e:
+                    err_msg = str(e)[:100]
+                    logger.warning(f"⚠️ 请求失败 ({attempt+1}/2): {err_msg}")
+                    
+                    if attempt == 0:
+                        time.sleep(random.uniform(2, 5))
+                    else:
+                        # 两次都失败，标记代理
+                        self.proxy_manager.mark_failed(proxy)
+                        break
+            
+            proxy_attempts += 1
+            self._close_session()
+            time.sleep(random.uniform(3, 6))
+        
+        logger.error(f"❌ 已尝试 {max_proxy_retries} 个代理，全部失败")
         return None
 
     def fetch_all_etfs(self) -> Optional[pd.DataFrame]:
@@ -116,8 +209,9 @@ class DataFetcher:
         
         all_data = []
         page = 1
+        consecutive_errors = 0  # 连续错误计数
         
-        while page <= 200:  # 安全上限
+        while page <= 200 and consecutive_errors < 3:
             logger.info(f"📄 获取第 {page} 页...")
             
             params = {
@@ -140,15 +234,20 @@ class DataFetcher:
                 "Accept": "application/json, text/javascript, */*; q=0.01",
             }
             
-            data = self._safe_request(url, params, headers)
+            data = self._safe_request(url, params, headers, max_proxy_retries=5)
             
             if not data or data.get('rc') != 0 or 'data' not in data or 'diff' not in data['data']:
-                if page == 1:
-                    logger.error("❌ 第一页获取失败，检查代理配置")
-                    return None
-                break
+                consecutive_errors += 1
+                logger.warning(f"⚠️ 第 {page} 页数据异常 (连续错误 {consecutive_errors}/3)")
+                if consecutive_errors >= 3:
+                    logger.error("❌ 连续 3 页错误，终止获取")
+                    break
+                continue
             
+            # 成功，重置错误计数
+            consecutive_errors = 0
             items = data['data']['diff']
+            
             if not items:
                 break
                 
@@ -159,7 +258,7 @@ class DataFetcher:
                 break
             
             page += 1
-            time.sleep(random.uniform(2, 5))
+            time.sleep(random.uniform(1, 3))  # 页间延迟
         
         self._close_session()
         
@@ -299,10 +398,13 @@ class DataFetcher:
 
 # ===================== 主入口 =====================
 if __name__ == "__main__":
-    print("=" * 50)
-    print("🚀 DataFetcher V21.1 - 东财 ETF 数据获取")
-    print("🌐 代理: 31.59.20.176:6754")
-    print("=" * 50)
+    print("=" * 60)
+    print("🚀 DataFetcher V22.0 - 东财 ETF 数据获取")
+    print(f"🌐 代理池: {len(PROXY_POOL)} 个节点")
+    for i, p in enumerate(PROXY_POOL[:3], 1):
+        print(f"   {i}. {p.location} {p.host}:{p.port}")
+    print(f"   ... 等共 {len(PROXY_POOL)} 个")
+    print("=" * 60)
     
     # 加载配置
     try:
@@ -321,8 +423,8 @@ if __name__ == "__main__":
     fetcher = DataFetcher()
     success = fetcher.run(funds)
     
-    print(f"\n{'=' * 50}")
+    print(f"\n{'=' * 60}")
     print(f"🏁 完成: {success}/{len(funds)} ({success/len(funds)*100:.1f}%)")
-    print(f"{'=' * 50}")
+    print(f"{'=' * 60}")
     
     sys.exit(0 if success > 0 else 1)
