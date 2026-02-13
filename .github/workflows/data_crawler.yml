@@ -41,6 +41,9 @@ jobs:
     # 步骤 1: 抓取 基金交易/行情数据 (Market)
     # ----------------------------------------------------------------
     - name: 📈 Run Market Data Fetcher
+      # 🟢 [关键修改] 将 Secret 注入到环境变量，供 Python 读取
+      env:
+        SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
       # 注意：由于代码中增加了东财50秒延时，请确保总运行时间不超过6小时
       run: |
         python data_fetcher.py
@@ -49,6 +52,9 @@ jobs:
     # 步骤 2: 抓取 7x24 全球财经电报 (News)
     # ----------------------------------------------------------------
     - name: 🕷️ Run News Crawler
+      # 🟢 [关键修改] 同样注入 Key，防止新闻接口也需要代理
+      env:
+        SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
       run: |
         python news_loader.py
 
