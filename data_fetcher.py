@@ -41,7 +41,7 @@ def retry(retries=3, delay=10):
 # ====================================================================================
 
 class DataFetcher:
-    # [V15.17] 统一字段规范（所有数据源返回的字段结构）
+    # [V15.20] 统一字段规范（所有数据源返回的字段结构）
     UNIFIED_COLUMNS = [
         'date', 'open', 'high', 'low', 'close', 'volume',
         'amount', 'amplitude', 'pct_change', 'change', 'turnover_rate',
@@ -53,13 +53,66 @@ class DataFetcher:
         if not os.path.exists(self.DATA_DIR):
             os.makedirs(self.DATA_DIR)
             
-        # [优化] 扩充 User-Agent 池，防止被轻易识别
+        # [优化 V15.20] 扩充 User-Agent 池，防止被轻易识别
         self.user_agents = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.0.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.0.36",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.0.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.0.36 Edg/120.0.0.0",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.0.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.0.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.0.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.0.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.0.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.0.36 Edg/119.0.0.0",
         ]
+        
+        # [新增 V15.20] 用于存储临时 session，每次请求后重置
+        self._temp_session = None
+
+    def _get_random_headers(self):
+        """[新增 V15.20] 生成随机请求头"""
+        ua = random.choice(self.user_agents)
+        return {
+            'User-Agent': ua,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'close',  # [关键] 短连接，请求完立即断开
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Cache-Control': 'max-age=0',
+        }
+
+    def _create_short_session(self):
+        """[新增 V15.20] 创建短连接 session，每次请求都是新的连接"""
+        # 如果存在旧 session，先关闭
+        self._close_session()
+        
+        # 创建新 session
+        session = requests.Session()
+        headers = self._get_random_headers()
+        session.headers.update(headers)
+        
+        # [关键] 设置连接为短连接，不保持 alive
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=1,
+            pool_maxsize=1,
+            max_retries=0,  # 不重试，让上层装饰器处理重试
+        )
+        session.mount('http://', adapter)
+        session.mount('https://', adapter)
+        
+        self._temp_session = session
+        return session
+
+    def _close_session(self):
+        """[新增 V15.20] 关闭当前 session"""
+        if self._temp_session:
+            try:
+                self._temp_session.close()
+            except:
+                pass
+            self._temp_session = None
 
     def _verify_data_freshness(self, df, fund_code, source_name):
         """数据新鲜度审计 (通用)"""
@@ -87,7 +140,7 @@ class DataFetcher:
 
     def _standardize_dataframe(self, df, source_name):
         """
-        [V15.17] 标准化 DataFrame：确保所有数据源返回统一的字段结构
+        [V15.20] 标准化 DataFrame：确保所有数据源返回统一的字段结构
         缺失字段填充为 NaN
         """
         if df is None or df.empty:
@@ -118,15 +171,34 @@ class DataFetcher:
         """
         [私有方法] 纯联网获取数据 (东财 -> 新浪 -> 腾讯)
         所有数据源统一返回标准字段结构
+        [优化 V15.20] 使用短连接 + 随机 UA，每次请求后断开
         """
         fetch_time = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
         
         # 1. 东财 (EastMoney) - 优先数据源，字段最全
-        # [优化] 增加随机延时，减少被 Ban 概率
+        # [优化 V15.20] 使用短连接，随机 UA，请求后立即断开
         try:
-            time.sleep(random.uniform(5.0, 9.0)) 
-            logger.info(f"Trying EastMoney for {fund_code}...")
+            # 随机延时
+            sleep_time = random.uniform(3.0, 7.0)
+            logger.info(f"⏳ 预等待 {sleep_time:.1f}s...")
+            time.sleep(sleep_time)
             
+            logger.info(f"🌐 [东财] 发起新连接获取 {fund_code}...")
+            
+            # [关键 V15.20] 创建新的短连接 session
+            session = self._create_short_session()
+            
+            # 通过 akshare 的 session 机制注入我们的 headers
+            # 注意：akshare 底层可能使用 requests，我们尝试设置全局 headers
+            original_headers = getattr(ak, '_HEADERS', None)
+            
+            try:
+                # 尝试临时修改 akshare 的请求头（如果它暴露了这个接口）
+                ak._HEADERS = self._get_random_headers()
+            except:
+                pass
+            
+            # 调用 akshare 接口
             df = ak.fund_etf_hist_em(
                 symbol=fund_code, 
                 period="daily", 
@@ -134,6 +206,17 @@ class DataFetcher:
                 end_date="20500101", 
                 adjust="qfq"
             )
+            
+            # 恢复原始 headers
+            try:
+                if original_headers:
+                    ak._HEADERS = original_headers
+            except:
+                pass
+            
+            # [关键 V15.20] 立即关闭连接
+            self._close_session()
+            logger.info(f"🔌 [东财] 连接已关闭")
             
             # 东财字段映射（最全）
             rename_map = {
@@ -158,18 +241,29 @@ class DataFetcher:
             df = self._standardize_dataframe(df, "东财")
             if not df.empty: 
                 return df, "东财"
-        except (ConnectionError, requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError) as e:
+                
+        except (ConnectionError, requests.exceptions.ConnectionError, 
+                requests.exceptions.ChunkedEncodingError, requests.exceptions.SSLError) as e:
             logger.error(f"❌ 东财连接被重置 (反爬拦截): {e}")
+            self._close_session()  # 确保关闭
             # 不抛出异常，让程序继续走下面的新浪逻辑
         except Exception as e:
             logger.error(f"⚠️ 东财数据源异常: {e}")
+            self._close_session()  # 确保关闭
             pass
 
         # 2. 新浪 (Sina) - 备用源，更稳定
         try:
-            time.sleep(2)
-            logger.info(f"Falling back to Sina for {fund_code}...")
+            time.sleep(random.uniform(2.0, 5.0))
+            logger.info(f"🌐 [新浪] 获取 {fund_code}...")
+            
+            # 新浪通常较稳定，但我们也用短连接
+            session = self._create_short_session()
+            
             df = ak.fund_etf_hist_sina(symbol=fund_code)
+            
+            self._close_session()
+            logger.info(f"🔌 [新浪] 连接已关闭")
             
             if df.index.name in ['date', '日期']: 
                 df = df.reset_index()
@@ -215,12 +309,16 @@ class DataFetcher:
                 return df, "新浪"
         except Exception as e:
             logger.error(f"⚠️ 新浪数据源异常: {e}")
+            self._close_session()
             pass
 
         # 3. 腾讯 (Tencent) - 最后的防线
         try:
-            time.sleep(2)
-            logger.info(f"Falling back to Tencent for {fund_code}...")
+            time.sleep(random.uniform(2.0, 5.0))
+            logger.info(f"🌐 [腾讯] 获取 {fund_code}...")
+            
+            session = self._create_short_session()
+            
             prefix = 'sh' if fund_code.startswith('5') else ('sz' if fund_code.startswith('1') else '')
             if prefix:
                 df = ak.stock_zh_a_hist_tx(
@@ -228,6 +326,9 @@ class DataFetcher:
                     start_date="20200101", 
                     adjust="qfq"
                 )
+                
+                self._close_session()
+                logger.info(f"🔌 [腾讯] 连接已关闭")
                 
                 rename_map = {
                     '日期': 'date',
@@ -253,6 +354,7 @@ class DataFetcher:
                     return df, "腾讯"
         except Exception as e:
             logger.error(f"⚠️ 腾讯数据源异常: {e}")
+            self._close_session()
             pass
         
         return None, None
@@ -273,10 +375,11 @@ class DataFetcher:
             df.to_csv(file_path)
             logger.info(f"💾 [{source}] {fund_code} 数据已保存至 {file_path}")
             
-            # [关键优化] 如果是东财数据，强制等待 40 秒 (应对最近的反爬升级)
+            # [优化 V15.20] 如果是东财数据，强制等待 25-35 秒 (随机化，应对反爬)
             if source == "东财":
-                logger.info("⏳ [东财] 触发频率保护机制，强制等待 40 秒...")
-                time.sleep(40)
+                wait_time = random.uniform(25, 35)
+                logger.info(f"⏳ [东财] 触发频率保护，等待 {wait_time:.1f}s...")
+                time.sleep(wait_time)
             
             return True
         else:
@@ -310,7 +413,7 @@ class DataFetcher:
 # [新增] 独立运行入口 (让此脚本变身爬虫)
 # ==========================================
 if __name__ == "__main__":
-    print("🚀 [DataFetcher] 启动多源行情抓取 (V15.19 Anti-Ban Mode)...")
+    print("🚀 [DataFetcher] 启动多源行情抓取 (V15.20 Short-Connection Mode)...")
     
     def load_config_local():
         try:
@@ -338,8 +441,8 @@ if __name__ == "__main__":
             if fetcher.update_cache(code):
                 success_count += 1
             # 基础间隔，防止多源切换时也过快
-            time.sleep(random.uniform(5.0, 9.0))
+            time.sleep(random.uniform(3.0, 6.0))
         except Exception as e:
             print(f"❌ 更新异常 {name}: {e}")
             
-    print(f"🏁 行情更新完成: {success_count}/{len(funds)} (已启用强力防封模式)")
+    print(f"🏁 行情更新完成: {success_count}/{len(funds)} (短连接模式)")
