@@ -25,21 +25,6 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-def retry(retries: int = 3, delay: float = 5.0):
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            for i in range(retries):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    logger.warning(f"⚠️ [Retry {i+1}/{retries}] {func.__name__} 失败: {e}")
-                    if i < retries - 1:
-                        time.sleep(delay * (i + 1))
-            logger.error(f"❌ {func.__name__} 重试耗尽")
-            return None
-        return wrapper
-    return decorator
-
 # ===================== DataFetcher 类 =====================
 class DataFetcher:
     UNIFIED_COLUMNS = [
@@ -54,14 +39,30 @@ class DataFetcher:
         
         self.spot_data_cache: Optional[pd.DataFrame] = None
         self.spot_data_date: Optional[str] = None
-        self.session = cffi_requests.Session(impersonate="chrome120")
+        
+        # 每次请求后重新创建 session，避免连接复用被追踪
+        self.session = None
 
-    def __del__(self):
-        if hasattr(self, 'session'):
+    def _create_session(self):
+        """创建新的 session"""
+        if self.session:
             try:
                 self.session.close()
             except:
                 pass
+        self.session = cffi_requests.Session(impersonate="chrome120")
+        # 随机等待，模拟人类操作
+        time.sleep(random.uniform(3, 8))
+
+    def _close_session(self):
+        if self.session:
+            try:
+                self.session.close()
+            except:
+                pass
+            self.session = None
+            gc.collect()
+            time.sleep(1)
 
     def _standardize_dataframe(self, df: pd.DataFrame, source_name: str) -> pd.DataFrame:
         if df is None or df.empty:
@@ -80,13 +81,13 @@ class DataFetcher:
                 df.loc[:, col] = pd.to_numeric(df[col], errors='coerce')
         return df
 
-    def _fetch_single_page(self, pn: int, pz: int = 100) -> Optional[List[dict]]:
-        """获取单页数据"""
+    def _fetch_single_page(self, pn: int, pz: int = 100, max_retries: int = 3) -> Optional[List[dict]]:
+        """获取单页数据，带重试"""
         url = "https://push2.eastmoney.com/api/qt/clist/get"
         
         params = {
-            "pn": str(pn),      # 页码
-            "pz": str(pz),      # 每页数量，最大100
+            "pn": str(pn),
+            "pz": str(pz),
             "po": "1",
             "np": "1",
             "ut": "bd1d9ddb04089700cf9c27f6f7426281",
@@ -104,58 +105,82 @@ class DataFetcher:
             "Accept": "application/json, text/javascript, */*; q=0.01",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             "X-Requested-With": "XMLHttpRequest",
+            "Connection": "close",  # 短连接
         }
 
-        try:
-            r = self.session.get(url, params=params, headers=headers, timeout=15)
-            
-            if r.status_code != 200:
-                logger.error(f"❌ 页 {pn} 请求失败: {r.status_code}")
-                return None
-
-            data_json = r.json()
-            
-            if not data_json or data_json.get('rc') != 0:
-                logger.error(f"❌ 页 {pn} API错误: {data_json.get('rt', '未知')}")
-                return None
+        for attempt in range(max_retries):
+            try:
+                if not self.session:
+                    self._create_session()
                 
-            if 'data' not in data_json or 'diff' not in data_json['data']:
-                return None
+                r = self.session.get(url, params=params, headers=headers, timeout=20)
                 
-            return data_json['data']['diff']
-            
-        except Exception as e:
-            logger.error(f"❌ 页 {pn} 异常: {e}")
-            return None
+                if r.status_code != 200:
+                    logger.error(f"❌ 页 {pn} 状态码: {r.status_code}")
+                    if attempt < max_retries - 1:
+                        self._close_session()
+                        time.sleep(random.uniform(5, 10))
+                        continue
+                    return None
 
-    @retry(retries=3, delay=5)
+                data_json = r.json()
+                
+                if not data_json or data_json.get('rc') != 0:
+                    logger.error(f"❌ 页 {pn} API错误: {data_json.get('rt', '未知')}")
+                    return None
+                    
+                if 'data' not in data_json or 'diff' not in data_json['data']:
+                    return None
+                    
+                return data_json['data']['diff']
+                
+            except Exception as e:
+                logger.warning(f"⚠️ 页 {pn} 第 {attempt+1} 次尝试失败: {e}")
+                self._close_session()
+                if attempt < max_retries - 1:
+                    time.sleep(random.uniform(5, 10))
+                else:
+                    logger.error(f"❌ 页 {pn} 最终失败")
+                    return None
+        
+        return None
+
     def _fetch_eastmoney_raw_spot(self) -> Optional[pd.DataFrame]:
         """
-        [修复 V19.0] 分页获取所有 ETF 数据
-        东财 API 每页最大 100 条，需要遍历所有页面
+        [V20.0] 分页获取所有 ETF 数据，更保守的策略
         """
         logger.info("🚀 [黑科技] 正在分页获取东财全市场 ETF 数据...")
+        logger.info("⏳ 初始冷却 10-15 秒...")
+        time.sleep(random.uniform(10, 15))  # 初始长延迟
         
         all_data = []
         page = 1
-        max_pages = 100  # 安全上限，防止无限循环
+        max_pages = 50  # 降低上限
         
         while page <= max_pages:
             logger.info(f"📄 获取第 {page} 页...")
             page_data = self._fetch_single_page(page, pz=100)
             
             if not page_data:
+                if page == 1:
+                    logger.error("❌ 第一页就失败，可能 IP 被临时封禁")
+                    return None
                 break
                 
             all_data.extend(page_data)
             logger.info(f"   本页 {len(page_data)} 条，累计 {len(all_data)} 条")
             
-            # 如果本页不足 100 条，说明是最后一页
             if len(page_data) < 100:
                 break
-                
+            
+            # 翻页前长延迟
             page += 1
-            time.sleep(random.uniform(0.5, 1.5))  # 页间随机延迟
+            if page <= max_pages:
+                delay = random.uniform(8, 15)  # 翻页延迟 8-15 秒
+                logger.info(f"   等待 {delay:.1f} 秒...")
+                time.sleep(delay)
+        
+        self._close_session()
         
         if not all_data:
             logger.error("❌ 未获取到任何数据")
@@ -163,10 +188,8 @@ class DataFetcher:
             
         logger.info(f"✅ 共获取 {len(all_data)} 条 ETF 数据")
         
-        # 转换为 DataFrame
         df = pd.DataFrame(all_data)
         
-        # 字段映射
         rename_map = {
             'f12': 'code',
             'f14': 'name',
@@ -186,13 +209,13 @@ class DataFetcher:
         existing_cols = {k: v for k, v in rename_map.items() if k in df.columns}
         df.rename(columns=existing_cols, inplace=True)
         
-        # 清理代码格式（去除市场前缀）
-        df['code'] = df['code'].astype(str).str.strip().str.replace(r'^[shsz]+', '', regex=True)
+        # 清理代码格式
+        df['code'] = df['code'].astype(str).str.strip().str.lower()
+        df['code'] = df['code'].str.replace(r'^(sh|sz)', '', regex=True)
         
-        # 去重（以防万一）
         df = df.drop_duplicates(subset=['code'], keep='first')
         
-        logger.info(f"✅ 去重后共 {len(df)} 条，字段: {list(df.columns)}")
+        logger.info(f"✅ 去重后共 {len(df)} 条")
         return df.set_index('code')
 
     def _init_spot_data(self) -> bool:
@@ -224,12 +247,11 @@ class DataFetcher:
             if not self._init_spot_data():
                 return False
 
-        clean_code = str(fund_code).strip()
-        # 统一处理代码格式
-        clean_code = clean_code.lower().replace('sh', '').replace('sz', '')
+        clean_code = str(fund_code).strip().lower()
+        clean_code = clean_code.replace('sh', '').replace('sz', '')
         
         if clean_code not in self.spot_data_cache.index:
-            logger.warning(f"⚠️ 未找到 {fund_code} (clean: {clean_code})")
+            logger.warning(f"⚠️ 未找到 {fund_code}")
             return False
 
         try:
@@ -279,7 +301,7 @@ class DataFetcher:
             final_df = self._standardize_dataframe(df_final, "东财")
             final_df.to_csv(file_path)
             
-            logger.info(f"💾 [东财] {fund_code} 更新成功 (收盘: {new_data['close']:.3f}, 涨跌: {new_data['pct_change']:.2f}%)")
+            logger.info(f"💾 {fund_code} 更新成功 (收盘: {new_data['close']:.3f})")
             return True
 
         except Exception as e:
@@ -288,7 +310,7 @@ class DataFetcher:
 
 # ===================== 主程序 =====================
 if __name__ == "__main__":
-    print("🚀 [DataFetcher] 启动 (curl_cffi 分页版 V19.0)...")
+    print("🚀 [DataFetcher] 启动 (V20.0 超保守模式)...")
     
     try:
         with open('config.yaml', 'r', encoding='utf-8') as f:
@@ -305,7 +327,8 @@ if __name__ == "__main__":
     fetcher = DataFetcher()
     
     if not fetcher._init_spot_data():
-        logger.error("❌ 初始化失败")
+        logger.error("❌ 初始化失败，尝试使用备用方案...")
+        # 这里可以添加备用数据源逻辑
         exit(1)
 
     success_count = 0
@@ -328,6 +351,3 @@ if __name__ == "__main__":
             
     logger.info(f"🏁 完成: {success_count}/{total}")
     print(f"🏁 行情更新完成: {success_count}/{total}")
-    
-    del fetcher
-    gc.collect()
