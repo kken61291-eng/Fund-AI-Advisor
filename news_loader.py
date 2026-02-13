@@ -4,6 +4,7 @@ import os
 import time
 import requests
 import pandas as pd
+import random
 from datetime import datetime
 import hashlib
 import pytz
@@ -23,6 +24,20 @@ from selenium.webdriver.support import expected_conditions as EC
 DATA_DIR = "data_news"
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
+
+# --- 随机 User-Agent 池 ---
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+]
+
+def get_random_ua():
+    """获取随机 User-Agent"""
+    return random.choice(USER_AGENTS)
 
 def get_beijing_time():
     return datetime.now(pytz.timezone('Asia/Shanghai'))
@@ -46,7 +61,7 @@ def clean_time_str(t_str):
         return str(t_str)
 
 # ==========================================
-# 1. 东财抓取 (双保险模式 - 修复解析)
+# 1. 东财抓取 (双保险模式 - 修复解析 + 随机UA + 详细日志)
 # ==========================================
 def fetch_eastmoney_direct():
     """
@@ -57,10 +72,14 @@ def fetch_eastmoney_direct():
         print("   - [Plan B] 启动东财直连模式 (Direct API)...")
         # 东财 7x24 快讯接口
         url = "https://newsapi.eastmoney.com/kuaixun/v1/getlist_102_ajaxResult_50_1_.html"
+        
+        # 使用随机 User-Agent
+        current_ua = get_random_ua()
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": current_ua,
             "Referer": "https://kuaixun.eastmoney.com/"
         }
+        
         # 增加超时时间
         resp = requests.get(url, headers=headers, timeout=15)
         
@@ -126,16 +145,20 @@ def fetch_eastmoney():
                 })
             print(f"   - [Plan A] 成功获取 {len(items)} 条数据")
             return items
-    except AttributeError:
-        print("   ⚠️ Akshare 版本不兼容 (AttributeError)，切换至 Plan B...")
+    except AttributeError as e:
+        # [修改] 打印详细错误
+        print(f"   ⚠️ [Plan A] Akshare 版本不兼容 (AttributeError): {e}")
+        print("   -> 切换至 Plan B...")
     except Exception as e:
-        print(f"   ⚠️ Akshare 调用出错，切换至 Plan B...")
+        # [修改] 打印详细错误日志，方便分析
+        print(f"   ⚠️ [Plan A] Akshare 调用异常 (Error Details): {e}")
+        print("   -> 切换至 Plan B...")
 
     # --- 失败则执行 Plan B ---
     return fetch_eastmoney_direct()
 
 # ==========================================
-# 2. 财联社抓取 (浏览器模式)
+# 2. 财联社抓取 (浏览器模式 + 随机UA)
 # ==========================================
 def fetch_cls_selenium():
     items = []
@@ -148,7 +171,11 @@ def fetch_cls_selenium():
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36")
+        
+        # 使用随机 User-Agent
+        current_ua = get_random_ua()
+        chrome_options.add_argument(f"user-agent={current_ua}")
+        print(f"     (Current UA: {current_ua[:30]}...)")
 
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=chrome_options)
