@@ -20,11 +20,8 @@ except ImportError:
 
 # ===================== 配置 =====================
 
-# 🟢 已硬编码你的 ScraperAPI Key
+# 🟢 ScraperAPI Key (保持不变)
 SCRAPERAPI_KEY = "051bfb47887b7b5c254b7f78d39e2c4f"
-
-# 如果 ScraperAPI 额度耗尽(403错误)或失败，是否允许自动降级为本机直连？
-# 建议为 True，因为东财对本机少量抓取通常是放行的
 ALLOW_DIRECT_FALLBACK = True 
 
 def get_beijing_time():
@@ -50,25 +47,21 @@ class DataFetcher:
         self.spot_data_date: Optional[str] = None
         self.session: Optional[cffi_requests.Session] = None
         
-        # 统计
         self.total_funds = 0
         self.success_count = 0
         
     def _get_scraperapi_proxy(self) -> str:
-        """构造 ScraperAPI 代理字符串"""
         return f"http://scraperapi:{SCRAPERAPI_KEY}@proxy-server.scraperapi.com:8001"
 
     def _create_session(self, use_proxy: bool = True):
-        """创建 Session"""
         self._close_session()
-        
         try:
             if use_proxy and SCRAPERAPI_KEY:
                 proxy_url = self._get_scraperapi_proxy()
                 self.session = cffi_requests.Session(
                     impersonate="chrome120",
                     proxies={"http": proxy_url, "https": proxy_url},
-                    timeout=60,  # ScraperAPI 需要时间寻找节点
+                    timeout=60,
                     verify=False 
                 )
                 logger.info(f"🌐 使用 ScraperAPI 代理通道")
@@ -78,7 +71,6 @@ class DataFetcher:
                     timeout=30
                 )
                 logger.info(f"🔌 使用直连模式 (无代理)")
-                
         except Exception as e:
             logger.error(f"❌ 创建 session 失败: {e}")
             raise
@@ -93,31 +85,19 @@ class DataFetcher:
             gc.collect()
 
     def _safe_request(self, url: str, params: dict, headers: dict, max_retries: int = 3) -> Optional[dict]:
-        """
-        请求逻辑：
-        1. 默认尝试使用 ScraperAPI
-        2. 如果 ScraperAPI 失败 (403/Timeout) 且允许 Fallback，尝试直连
-        """
-        
-        # 确保 session 存在，默认为代理模式
         if self.session is None:
             self._create_session(use_proxy=True)
 
         for attempt in range(max_retries):
             try:
-                if not self.session:
-                    raise Exception("Session Lost")
-                
-                # 发起请求
+                if not self.session: raise Exception("Session Lost")
                 r = self.session.get(url, params=params, headers=headers)
                 
-                # ScraperAPI 特有错误码处理
                 if r.status_code == 403:
-                    logger.warning("⚠️ ScraperAPI 返回 403 (可能 Key 无效或额度耗尽)")
+                    logger.warning("⚠️ ScraperAPI 返回 403 (额度耗尽/Key错误)")
                     if ALLOW_DIRECT_FALLBACK:
                          logger.info("🔄 降级为直连重试...")
                          self._create_session(use_proxy=False)
-                         # 立即重试
                          try:
                              r = self.session.get(url, params=params, headers=headers)
                              r.raise_for_status()
@@ -130,12 +110,9 @@ class DataFetcher:
                         
                 r.raise_for_status()
                 return r.json()
-                
             except (ProxyError, Timeout, RequestException) as e:
-                logger.warning(f"⚠️ 请求失败 ({attempt+1}/{max_retries}): {str(e)[:100]}")
+                logger.warning(f"⚠️ 请求失败 ({attempt+1}/{max_retries}): {str(e)[:80]}")
                 time.sleep(2) 
-                
-                # 如果是最后一次尝试且允许直连，尝试最后一次直连
                 if attempt == max_retries - 1 and ALLOW_DIRECT_FALLBACK:
                      logger.info("🔄 最终尝试：切换到直连模式")
                      self._create_session(use_proxy=False)
@@ -145,35 +122,34 @@ class DataFetcher:
                          return r.json()
                      except:
                          pass
-        
-        logger.error("❌ 所有尝试均失败")
         return None
 
     def fetch_all_etfs(self) -> Optional[pd.DataFrame]:
-        """获取全市场 ETF 数据"""
         url = "https://push2.eastmoney.com/api/qt/clist/get"
-        
         all_data = []
         page = 1
         consecutive_errors = 0
         
-        logger.info("📡 开始获取 ETF 全量列表 (含债券/商品/跨境)...")
+        logger.info("📡 开始获取 ETF 全量列表 (全口径: 股票/债券/商品/跨境)...")
         
         while page <= 200 and consecutive_errors < 3:
             if page % 10 == 0:
                 logger.info(f"📄 获取第 {page} 页...")
             
-            # 修正点：移除 invt 和 fltt 参数，以获取所有类型的 ETF
+            # 🔴 关键修改：使用 m:1 t:2 等参数来覆盖所有基金类型，而非使用板块代码
+            # m:1 t:2 = 沪市基金(含债券), m:0 t:6 = 深市基金(含商品)
+            fs_param = "b:MK0021,b:MK0022,b:MK0023,b:MK0024,m:1 t:2,m:1 t:23,m:0 t:6,m:0 t:80"
+            
             params = {
                 "pn": str(page),
                 "pz": "100",
                 "po": "1",
                 "np": "1",
                 "ut": "bd1d9ddb04089700cf9c27f6f7426281",
-                # "fltt": "2",  <-- 已移除：防止过滤掉债券/商品ETF
-                # "invt": "2",  <-- 已移除：防止过滤掉非权益类ETF
+                "fltt": "2",  # 恢复这两个参数，但在 fs 里扩大了范围
+                "invt": "2",  # 配合新的 fs 参数，这两个参数其实不影响结果了
                 "fid": "f3",
-                "fs": "b:MK0021,b:MK0022,b:MK0023,b:MK0024",
+                "fs": fs_param, # <--- 核心修改
                 "fields": "f12,f14,f2,f3,f4,f5,f6,f7,f8,f15,f16,f17,f18",
                 "_": str(int(time.time() * 1000))
             }
@@ -188,31 +164,22 @@ class DataFetcher:
             if not data or data.get('rc') != 0 or 'data' not in data or 'diff' not in data['data']:
                 consecutive_errors += 1
                 logger.warning(f"⚠️ 第 {page} 页数据异常 (连续错误 {consecutive_errors}/3)")
-                if consecutive_errors >= 3:
-                    break
+                if consecutive_errors >= 3: break
                 continue
             
             consecutive_errors = 0
             items = data['data']['diff']
-            
-            if not items:
-                break
-                
+            if not items: break
             all_data.extend(items)
-            # logger.info(f"   ✅ 本页 {len(items)} 条")
             
-            if len(items) < 100:
-                break
-            
+            if len(items) < 100: break
             page += 1
             time.sleep(0.5) 
         
         self._close_session()
         
-        if not all_data:
-            return None
+        if not all_data: return None
         
-        # 处理数据
         df = pd.DataFrame(all_data)
         rename_map = {
             'f12': 'code', 'f14': 'name', 'f2': 'close', 'f3': 'pct_change',
@@ -224,17 +191,14 @@ class DataFetcher:
         if 'code' in df.columns:
             df['code'] = df['code'].astype(str).str.strip().str.lower().str.replace(r'^(sh|sz)', '', regex=True)
             df = df.drop_duplicates(subset=['code'], keep='first')
-            logger.info(f"✅ 共获取 {len(df)} 只 ETF (全类型)")
+            logger.info(f"✅ 共获取 {len(df)} 只 ETF (Deep Search)")
             return df.set_index('code')
         else:
             return None
 
     def init_spot_data(self) -> bool:
         today = get_beijing_time().strftime("%Y-%m-%d")
-        
-        if self.spot_data_cache is not None and self.spot_data_date == today:
-            return True
-        
+        if self.spot_data_cache is not None and self.spot_data_date == today: return True
         df = self.fetch_all_etfs()
         if df is not None and not df.empty:
             self.spot_data_cache = df
@@ -244,13 +208,12 @@ class DataFetcher:
 
     def update_single(self, fund_code: str) -> bool:
         if self.spot_data_cache is None:
-            if not self.init_spot_data():
-                return False
+            if not self.init_spot_data(): return False
         
         code = str(fund_code).strip().lower().replace('sh', '').replace('sz', '')
         
         if code not in self.spot_data_cache.index:
-            logger.warning(f"⚠️ 未找到 {fund_code} (可能是已退市或代码错误)")
+            logger.warning(f"⚠️ 未找到 {fund_code} (请确认该代码是否已停牌或退市)")
             return False
         
         try:
@@ -307,36 +270,30 @@ class DataFetcher:
         self.total_funds = len(funds)
         self.success_count = 0
         
-        # 测试网络
-        logger.info("🔍 正在连接 ScraperAPI ...")
+        logger.info("🔍 正在连接 ScraperAPI (初始化)...")
         test = self._safe_request("https://push2.eastmoney.com/api/qt/clist/get", 
-                                  {"pn":"1","pz":"1","fs":"b:MK0021"}, {}, max_retries=2)
+                                  {"pn":"1","pz":"1","fs":"m:1 t:2"}, {}, max_retries=2)
         if not test:
-            logger.error("❌ 无法连接 (请检查 ScraperAPI 额度 或 网络)")
+            logger.error("❌ 无法连接")
             return 0
 
-        if not self.init_spot_data():
-            return 0
+        if not self.init_spot_data(): return 0
         
         for i, fund in enumerate(funds, 1):
             code = str(fund.get('code', '')).strip()
             if not code: continue
-            
             if self.update_single(code):
                 self.success_count += 1
-            
             if i % 50 == 0:
                  logger.info(f"📊 进度: {i}/{self.total_funds}, 成功: {self.success_count}")
-        
         return self.success_count
 
 # ===================== 主入口 =====================
 if __name__ == "__main__":
     print("=" * 60)
-    print("🚀 DataFetcher V23.2 (All-Types Support)")
+    print("🚀 DataFetcher V23.3 (Commodity & Bond Fix)")
     print("=" * 60)
     
-    # 模拟配置 (如果没找到config文件)
     funds = []
     if os.path.exists('config.yaml'):
         with open('config.yaml', 'r', encoding='utf-8') as f:
@@ -344,7 +301,12 @@ if __name__ == "__main__":
             funds = cfg.get('funds', [])
     else:
         logger.warning("⚠️ 使用测试数据 (config.yaml 未找到)")
-        funds = [{'code': '510300', 'name': '沪深300ETF'}, {'code': '510050', 'name': '上证50ETF'}]
+        # 强制加入刚才找不到的基金进行测试
+        funds = [
+            {'code': '510300', 'name': '沪深300ETF'}, 
+            {'code': '511090', 'name': '30年国债ETF'},
+            {'code': '159985', 'name': '豆粕ETF'}
+        ]
     
     if not funds:
         print("❌ 基金列表为空")
