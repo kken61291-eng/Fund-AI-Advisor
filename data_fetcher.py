@@ -178,7 +178,7 @@ class DataFetcher:
             df = ak.fund_etf_hist_em(
                 symbol=fund_code, 
                 period="daily", 
-                start_date="20230101", 
+                start_date="20250101", 
                 end_date="20500101", 
                 adjust="qfq"
             )
