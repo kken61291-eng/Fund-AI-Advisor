@@ -295,38 +295,26 @@ class DataFetcher:
             logger.error(f"❌ 读取历史数据失败 {fund_code}: {e}")
             return pd.DataFrame()
 
-    # 🟢 [新增] 宏观资金流获取接口 (通过 API)
     def get_market_net_flow(self) -> float:
         """获取全市场(上证+深证)主力资金净流入 (单位: 亿)"""
         try:
             url = "https://push2.eastmoney.com/api/qt/ulist.np/get"
             params = {
                 "fltt": "2",
-                "secids": "1.000001,0.399001", # 上证指数, 深证成指
-                "fields": "f62", # 主力净流入
+                "secids": "1.000001,0.399001",
+                "fields": "f62",
                 "_": str(int(time.time() * 1000))
             }
-            
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            }
-            
-            # 复用 _safe_request，享受 ScraperAPI/直连切换的稳定性
+            headers = {"User-Agent": "Mozilla/5.0"}
             data = self._safe_request(url, params, headers)
             
             if not data or 'diff' not in data.get('data', {}):
-                logger.warning("⚠️ 宏观资金流数据为空")
                 return 0.0
             
             total_flow = 0.0
             for item in data['data']['diff']:
-                # f62 可能为字符串或数字
-                flow = float(item.get('f62', 0))
-                total_flow += flow
-            
-            # 转换为亿元，保留2位小数
+                total_flow += float(item.get('f62', 0))
             return round(total_flow / 100000000, 2)
-            
         except Exception as e:
             logger.error(f"❌ 获取宏观资金流失败: {e}")
             return 0.0
@@ -336,11 +324,9 @@ class DataFetcher:
         self.success_count = 0
         
         logger.info("🔍 正在初始化...")
-        test = self._safe_request("https://push2.eastmoney.com/api/qt/clist/get", 
-                                  {"pn":"1","pz":"1","fs":"m:1 t:2"}, {}, max_retries=2)
-        if not test:
-            logger.error("❌ 无法连接网络")
-            return 0
+        # 顺便打印一下宏观资金流
+        flow = self.get_market_net_flow()
+        logger.info(f"💰 [Macro] 全市场主力净流入: {flow} 亿")
 
         if not self.init_spot_data(): return 0
         
@@ -355,9 +341,30 @@ class DataFetcher:
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("🚀 DataFetcher V23.7 (Macro Flow API)")
+    print("🚀 DataFetcher V23.8 (Fixed Main Loop)")
     print("=" * 60)
-    # 测试宏观资金流
-    f = DataFetcher()
-    flow = f.get_market_net_flow()
-    print(f"💰 当前全市场主力净流入: {flow} 亿")
+    
+    # 🟢 修复：加载 config.yaml 并执行循环
+    funds = []
+    if os.path.exists('config.yaml'):
+        try:
+            with open('config.yaml', 'r', encoding='utf-8') as f:
+                cfg = yaml.safe_load(f)
+                funds = cfg.get('funds', [])
+        except Exception as e:
+            logger.error(f"Config load error: {e}")
+    
+    if not funds:
+        logger.warning("⚠️ config.yaml 未找到，使用默认测试数据")
+        funds = [{'code': '510300', 'name': '沪深300ETF'}, {'code': '510050', 'name': '上证50ETF'}]
+    
+    print(f"📋 计划抓取 {len(funds)} 只基金...")
+    
+    fetcher = DataFetcher()
+    success = fetcher.run(funds)
+    
+    print(f"\n{'=' * 60}")
+    print(f"🏁 完成: {success}/{len(funds)}")
+    print(f"{'=' * 60}")
+    
+    sys.exit(0 if success > 0 else 1)
