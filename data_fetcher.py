@@ -13,7 +13,7 @@ from dataclasses import dataclass
 # 检查依赖
 try:
     from curl_cffi import requests as cffi_requests
-    from curl_cffi.requests.exceptions import RequestException, ProxyError
+    from curl_cffi.requests.exceptions import RequestException, ProxyError, Timeout
 except ImportError:
     print("❌ 请先安装依赖: pip install curl_cffi pandas pyyaml")
     sys.exit(1)
@@ -39,6 +39,7 @@ class Proxy:
     location: str = ""
     
     def __str__(self):
+        # 注意：curl_cffi 接受的代理格式为 scheme://user:pass@host:port
         return f"http://{self.user}:{self.password}@{self.host}:{self.port}"
     
     def to_dict(self):
@@ -46,6 +47,7 @@ class Proxy:
         return {"http": url, "https": url}
 
 # [代理池] 多个代理配置，按优先级排序
+# ⚠️ 注意：请确保这些代理 IP 和账号密码当前是有效的，否则会导致全部请求失败
 PROXY_POOL = [
     Proxy("31.59.20.176", 6754, "typembrv", "kx2q7wpv1dd4", "🇬🇧伦敦"),
     Proxy("23.95.150.145", 6114, "typembrv", "kx2q7wpv1dd4", "🇬🇧伦敦"),
@@ -80,10 +82,10 @@ class ProxyManager:
                 attempts += 1
                 continue
             
-            # 检查冷却时间（同一代理至少间隔 2 秒）
+            # 检查冷却时间（同一代理至少间隔 1 秒，避免过于频繁）
             last_time = self.last_used.get(proxy.host, 0)
-            if time.time() - last_time < 2:
-                time.sleep(2)
+            if time.time() - last_time < 1:
+                time.sleep(1)
             
             self.last_used[proxy.host] = time.time()
             return proxy
@@ -94,6 +96,7 @@ class ProxyManager:
         if self.failed_proxies:
             logger.warning("🔄 所有代理都失败过，重置失败列表重试...")
             self.failed_proxies.clear()
+            # 递归调用
             return self.get_next_proxy()
         
         return None
@@ -102,11 +105,9 @@ class ProxyManager:
         """标记代理为失败"""
         logger.warning(f"❌ 代理 {proxy.location} {proxy.host} 标记为失败")
         self.failed_proxies.add(proxy.host)
-        self._close_session()
     
-    def _close_session(self):
-        """清理 session"""
-        gc.collect()
+    def get_proxy_count(self):
+        return len(self.proxies)
 
 # ===================== DataFetcher =====================
 class DataFetcher:
@@ -129,11 +130,7 @@ class DataFetcher:
 
     def _create_session(self, proxy: Proxy):
         """使用指定代理创建 session"""
-        if self.session:
-            try:
-                self.session.close()
-            except:
-                pass
+        self._close_session() # 确保旧的被清理
         
         try:
             self.current_proxy = proxy
@@ -142,8 +139,8 @@ class DataFetcher:
                 proxies=proxy.to_dict(),
                 timeout=30
             )
-            logger.info(f"🌐 使用代理: {proxy.location} {proxy.host}:{proxy.port}")
-            time.sleep(random.uniform(0.5, 2))
+            logger.info(f"🌐 切换代理: {proxy.location} {proxy.host}:{proxy.port}")
+            time.sleep(random.uniform(0.5, 1))
         except Exception as e:
             logger.error(f"❌ 创建 session 失败: {e}")
             raise
@@ -159,48 +156,48 @@ class DataFetcher:
 
     def _safe_request(self, url: str, params: dict, headers: dict, max_proxy_retries: int = 3) -> Optional[dict]:
         """
-        带代理切换的重试机制
-        每个代理最多试 2 次，总共最多换 max_proxy_retries 个代理
+        带代理切换的重试机制 - 优化版
+        策略：优先使用当前 session，失败才切换代理
         """
-        proxy_attempts = 0
-        
-        while proxy_attempts < max_proxy_retries:
-            # 获取新代理
+        # 如果当前没有 session，先初始化一个
+        if self.session is None:
             proxy = self.proxy_manager.get_next_proxy()
             if not proxy:
-                logger.error("❌ 没有可用代理")
+                logger.error("❌ 启动失败：没有可用代理")
                 return None
-            
-            # 用此代理创建 session
             self._create_session(proxy)
-            
-            # 此代理重试 2 次
-            for attempt in range(2):
-                try:
-                    r = self.session.get(url, params=params, headers=headers, timeout=25)
-                    r.raise_for_status()
-                    return r.json()
+
+        # 尝试循环
+        for attempt in range(max_proxy_retries):
+            try:
+                # 使用当前 session 发起请求
+                if not self.session:
+                    raise Exception("Session丢失")
                     
-                except ProxyError as e:
-                    logger.warning(f"⚠️ 代理错误: {str(e)[:80]}")
-                    break  # 换代理
+                r = self.session.get(url, params=params, headers=headers)
+                r.raise_for_status()
+                return r.json()
+                
+            except (ProxyError, Timeout, RequestException, Exception) as e:
+                # 记录错误
+                err_msg = str(e)[:100]
+                proxy_info = f"{self.current_proxy.host}" if self.current_proxy else "Unknown"
+                logger.warning(f"⚠️ 请求失败 (代理: {proxy_info}): {err_msg}")
+                
+                # 标记当前代理有问题（如果是代理错误）
+                if self.current_proxy and (isinstance(e, ProxyError) or isinstance(e, Timeout)):
+                    self.proxy_manager.mark_failed(self.current_proxy)
+                
+                # 获取新代理并重建 Session
+                new_proxy = self.proxy_manager.get_next_proxy()
+                if not new_proxy:
+                    logger.error("❌ 代理池耗尽")
+                    return None
                     
-                except Exception as e:
-                    err_msg = str(e)[:100]
-                    logger.warning(f"⚠️ 请求失败 ({attempt+1}/2): {err_msg}")
-                    
-                    if attempt == 0:
-                        time.sleep(random.uniform(2, 5))
-                    else:
-                        # 两次都失败，标记代理
-                        self.proxy_manager.mark_failed(proxy)
-                        break
-            
-            proxy_attempts += 1
-            self._close_session()
-            time.sleep(random.uniform(3, 6))
+                self._create_session(new_proxy)
+                # 继续下一次循环尝试
         
-        logger.error(f"❌ 已尝试 {max_proxy_retries} 个代理，全部失败")
+        logger.error(f"❌ 已重试 {max_proxy_retries} 次，全部失败")
         return None
 
     def fetch_all_etfs(self) -> Optional[pd.DataFrame]:
@@ -211,8 +208,11 @@ class DataFetcher:
         page = 1
         consecutive_errors = 0  # 连续错误计数
         
+        logger.info("📡 开始获取 ETF 全量列表...")
+        
         while page <= 200 and consecutive_errors < 3:
-            logger.info(f"📄 获取第 {page} 页...")
+            if page % 10 == 0:
+                logger.info(f"📄 获取第 {page} 页...")
             
             params = {
                 "pn": str(page),
@@ -252,13 +252,14 @@ class DataFetcher:
                 break
                 
             all_data.extend(items)
-            logger.info(f"   ✅ 本页 {len(items)} 条，累计 {len(all_data)} 条")
             
             if len(items) < 100:
                 break
             
             page += 1
-            time.sleep(random.uniform(1, 3))  # 页间延迟
+            # 只有在非常快的时候才稍微暂停，代理模式下不需要太久的 sleep
+            if page % 5 == 0:
+                time.sleep(random.uniform(0.5, 1.5)) 
         
         self._close_session()
         
@@ -308,7 +309,7 @@ class DataFetcher:
         code = str(fund_code).strip().lower().replace('sh', '').replace('sz', '')
         
         if code not in self.spot_data_cache.index:
-            logger.warning(f"⚠️ 未找到 {fund_code}")
+            logger.warning(f"⚠️ 未找到 {fund_code}，可能是停牌或非 ETF")
             return False
         
         try:
@@ -345,13 +346,16 @@ class DataFetcher:
             if os.path.exists(path):
                 try:
                     df_old = pd.read_csv(path, index_col='date', parse_dates=['date'])
+                    # 如果今天的数据已存在，使用 update 更新；否则 concat 追加
                     if today in df_old.index:
                         df_old.update(df_new)
                         df_final = df_old
                     else:
                         df_final = pd.concat([df_old, df_new])
+                    
                     df_final = df_final[~df_final.index.duplicated(keep='last')].sort_index()
-                except:
+                except Exception as e:
+                    logger.error(f"读取旧文件出错 {path}: {e}")
                     df_final = df_new
             else:
                 df_final = df_new
@@ -359,7 +363,7 @@ class DataFetcher:
             # 标准化并保存
             df_final = df_final.reindex(columns=self.UNIFIED_COLUMNS)
             for col in ['open', 'high', 'low', 'close', 'volume', 'amount', 
-                       'amplitude', 'pct_change', 'change', 'turnover_rate']:
+                        'amplitude', 'pct_change', 'change', 'turnover_rate']:
                 df_final[col] = pd.to_numeric(df_final[col], errors='coerce')
             
             df_final.to_csv(path)
@@ -375,8 +379,15 @@ class DataFetcher:
         self.total_funds = len(funds)
         self.success_count = 0
         
+        # 预先测试代理连接
+        logger.info("🔍 正在测试代理连通性...")
+        test_res = self._safe_request("https://www.baidu.com", {}, {}, max_proxy_retries=3)
+        if not test_res and not self.session:
+            logger.error("❌ 无法连接网络，请检查代理配置")
+            # 即使百度测试失败也尝试继续，可能是百度被墙，但东财能通
+        
         if not self.init_spot_data():
-            logger.error("❌ 初始化失败，退出")
+            logger.error("❌ 初始化数据获取失败，退出")
             return 0
         
         for i, fund in enumerate(funds, 1):
@@ -386,37 +397,43 @@ class DataFetcher:
             if not code or len(code) < 6:
                 continue
             
-            logger.info(f"🔄 [{i}/{self.total_funds}] {name} ({code})")
+            # logger.info(f"🔄 [{i}/{self.total_funds}] {name} ({code})")
             
             if self.update_single(code):
                 self.success_count += 1
             
-            if i % 10 == 0 or i == self.total_funds:
-                logger.info(f"📊 进度: {i}/{self.total_funds}, 成功: {self.success_count}")
+            if i % 50 == 0:
+                 logger.info(f"📊 进度: {i}/{self.total_funds}, 成功: {self.success_count}")
         
         return self.success_count
 
 # ===================== 主入口 =====================
 if __name__ == "__main__":
     print("=" * 60)
-    print("🚀 DataFetcher V22.0 - 东财 ETF 数据获取")
+    print("🚀 DataFetcher V22.1 (Optimized) - 东财 ETF 数据获取")
     print(f"🌐 代理池: {len(PROXY_POOL)} 个节点")
     for i, p in enumerate(PROXY_POOL[:3], 1):
         print(f"   {i}. {p.location} {p.host}:{p.port}")
-    print(f"   ... 等共 {len(PROXY_POOL)} 个")
+    if len(PROXY_POOL) > 3:
+        print(f"   ... 等共 {len(PROXY_POOL)} 个")
     print("=" * 60)
     
     # 加载配置
     try:
-        with open('config.yaml', 'r', encoding='utf-8') as f:
-            cfg = yaml.safe_load(f)
-            funds = cfg.get('funds', [])
+        # 如果没有配置文件，创建一个假的用于测试
+        if not os.path.exists('config.yaml'):
+            logger.warning("⚠️ 未找到 config.yaml，使用测试数据")
+            funds = [{'code': '510300', 'name': '沪深300ETF'}, {'code': '510050', 'name': '上证50ETF'}]
+        else:
+            with open('config.yaml', 'r', encoding='utf-8') as f:
+                cfg = yaml.safe_load(f)
+                funds = cfg.get('funds', [])
     except Exception as e:
         logger.error(f"读取 config.yaml 失败: {e}")
         funds = []
     
     if not funds:
-        print("❌ 未找到基金列表，请检查 config.yaml")
+        print("❌ 未找到基金列表")
         sys.exit(1)
     
     # 运行
