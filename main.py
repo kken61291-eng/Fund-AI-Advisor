@@ -334,4 +334,15 @@ def main():
         # 传入风控报告 JSON 供 CIO 参考
         cio_html = analyst.generate_cio_strategy(
             datetime.now().strftime("%Y-%m-%d"), 
-            risk
+            risk_report
+        )
+        
+    # 渲染 HTML (使用 v19.3/v19.1 的渲染器均可)
+    html = render_html_report_v19(all_news_seen, final_results, cio_html, "") 
+    
+    subject_prefix = "🚧 [测试] " if TEST_MODE else "🕊️ "
+    send_email(f"{subject_prefix}鹊知风 v19.6 认知对抗报告", html)
+    
+    logger.info("✅ 运行结束，邮件已发送。")
+
+if __name__ == "__main__": main()
