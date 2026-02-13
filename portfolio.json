@@ -3,7 +3,7 @@
     "name": "中证2000ETF",
     "shares": 2645.5026455026455,
     "cost": 1.512,
-    "held_days": 3,
+    "held_days": 4,
     "history": [
       {
         "date": "2026-02-11",
@@ -71,7 +71,7 @@
     "name": "通信ETF",
     "shares": 5623.242736644799,
     "cost": 1.067,
-    "held_days": 3,
+    "held_days": 4,
     "history": [
       {
         "date": "2026-02-11",
@@ -411,7 +411,7 @@
     "name": "沪深300ETF",
     "shares": 423.1013327691982,
     "cost": 4.727,
-    "held_days": 2,
+    "held_days": 3,
     "history": [
       {
         "date": "2026-02-10",
@@ -479,7 +479,7 @@
     "name": "创业板ETF",
     "shares": 602.5911419102139,
     "cost": 3.319,
-    "held_days": 1,
+    "held_days": 2,
     "history": [
       {
         "date": "2026-02-11",
@@ -955,7 +955,7 @@
     "name": "中证500ETF",
     "shares": 234.90721165139772,
     "cost": 8.514,
-    "held_days": 3,
+    "held_days": 4,
     "history": [
       {
         "date": "2026-02-11",
@@ -1023,7 +1023,7 @@
     "name": "上证50ETF",
     "shares": 632.7111673521038,
     "cost": 3.161,
-    "held_days": 2,
+    "held_days": 3,
     "history": [
       {
         "date": "2026-02-11",
@@ -1091,7 +1091,7 @@
     "name": "机器人ETF",
     "shares": 3696.857670979667,
     "cost": 1.082,
-    "held_days": 6,
+    "held_days": 7,
     "history": [
       {
         "date": "2026-02-11",
@@ -1227,7 +1227,7 @@
     "name": "能源化工ETF",
     "shares": 4037.3546935695044,
     "cost": 1.288,
-    "held_days": 9,
+    "held_days": 10,
     "history": [
       {
         "date": "2026-02-10",
