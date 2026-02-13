@@ -6,9 +6,10 @@ import os
 import yaml
 import logging
 import requests
+import gc
 from datetime import datetime, time as dt_time
 
-# ===================== 临时补充 utils 模块缺失的部分（如果需要） =====================
+# ===================== 工具函数 =====================
 def get_beijing_time():
     """获取北京时间（东八区）"""
     from datetime import timezone, timedelta
@@ -19,10 +20,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def retry(retries=3, delay=10):
-    """
-    简易重试装饰器
-    [优化] 默认重试间隔从 5s 增加到 10s，应对网络波动
-    """
+    """简易重试装饰器"""
     def decorator(func):
         def wrapper(*args, **kwargs):
             for i in range(retries):
@@ -32,20 +30,38 @@ def retry(retries=3, delay=10):
                     logger.warning(f"⚠️ [Retry {i+1}/{retries}] 操作失败: {e}, 等待 {delay}s 后重试...")
                     if i == retries - 1:
                         logger.error(f"❌ 重试耗尽，最终失败: {e}")
-                        # 不抛出异常，返回 None 以便后续逻辑降级处理
                         return None, None 
                     time.sleep(delay)
             return None
         return wrapper
     return decorator
-# ====================================================================================
+
+def force_close_connections():
+    """[新增 V16.0] 强制关闭所有网络连接和连接池"""
+    try:
+        # 关闭 akshare 可能使用的全局 session
+        if hasattr(ak, '_session') and ak._session:
+            try:
+                ak._session.close()
+                ak._session = None
+            except:
+                pass
+        
+        # 触发垃圾回收，确保连接被释放
+        gc.collect()
+        
+        # 短暂暂停让操作系统回收端口
+        time.sleep(0.5)
+    except Exception as e:
+        logger.debug(f"关闭连接时出错: {e}")
+# ====================================================================
 
 class DataFetcher:
-    # [V15.20] 统一字段规范（所有数据源返回的字段结构）
+    # [V16.0] 统一字段规范
     UNIFIED_COLUMNS = [
         'date', 'open', 'high', 'low', 'close', 'volume',
         'amount', 'amplitude', 'pct_change', 'change', 'turnover_rate',
-        'fetch_time'  # 数据抓取时间
+        'fetch_time'
     ]
     
     def __init__(self):
@@ -53,69 +69,61 @@ class DataFetcher:
         if not os.path.exists(self.DATA_DIR):
             os.makedirs(self.DATA_DIR)
             
-        # [优化 V15.20] 扩充 User-Agent 池，防止被轻易识别
+        # [V16.0] 扩充 User-Agent 池
         self.user_agents = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.0.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.0.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.0.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.0.36 Edg/120.0.0.0",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.0.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.0.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.0.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.0.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.0.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.0.36 Edg/119.0.0.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
         ]
-        
-        # [新增 V15.20] 用于存储临时 session，每次请求后重置
-        self._temp_session = None
 
     def _get_random_headers(self):
-        """[新增 V15.20] 生成随机请求头"""
+        """[V16.0] 生成随机请求头"""
         ua = random.choice(self.user_agents)
         return {
             'User-Agent': ua,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-US;q=0.7',
             'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'close',  # [关键] 短连接，请求完立即断开
+            'DNT': '1',
+            'Connection': 'close',
             'Upgrade-Insecure-Requests': '1',
             'Sec-Fetch-Dest': 'document',
             'Sec-Fetch-Mode': 'navigate',
             'Sec-Fetch-Site': 'none',
-            'Cache-Control': 'max-age=0',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
         }
 
-    def _create_short_session(self):
-        """[新增 V15.20] 创建短连接 session，每次请求都是新的连接"""
-        # 如果存在旧 session，先关闭
-        self._close_session()
+    def _create_isolated_session(self):
+        """[V16.0] 创建完全隔离的短连接 session"""
+        # 先强制清理现有连接
+        force_close_connections()
         
-        # 创建新 session
+        # 创建新 session，禁用连接池
         session = requests.Session()
-        headers = self._get_random_headers()
-        session.headers.update(headers)
         
-        # [关键] 设置连接为短连接，不保持 alive
+        # [关键] 禁用 keep-alive，强制短连接
         adapter = requests.adapters.HTTPAdapter(
-            pool_connections=1,
-            pool_maxsize=1,
-            max_retries=0,  # 不重试，让上层装饰器处理重试
+            pool_connections=0,  # 禁用连接池
+            pool_maxsize=0,
+            max_retries=0,
         )
         session.mount('http://', adapter)
         session.mount('https://', adapter)
         
-        self._temp_session = session
+        # 设置随机请求头
+        session.headers.update(self._get_random_headers())
+        
         return session
 
-    def _close_session(self):
-        """[新增 V15.20] 关闭当前 session"""
-        if self._temp_session:
-            try:
-                self._temp_session.close()
-            except:
-                pass
-            self._temp_session = None
-
     def _verify_data_freshness(self, df, fund_code, source_name):
-        """数据新鲜度审计 (通用)"""
+        """数据新鲜度审计"""
         if df is None or df.empty: 
             return
         
@@ -139,25 +147,18 @@ class DataFetcher:
             logger.warning(f"审计数据新鲜度失败: {e}")
 
     def _standardize_dataframe(self, df, source_name):
-        """
-        [V15.20] 标准化 DataFrame：确保所有数据源返回统一的字段结构
-        缺失字段填充为 NaN
-        """
+        """[V16.0] 标准化 DataFrame"""
         if df is None or df.empty:
             return df
         
-        # [修复] 显式创建 DataFrame 的副本，避免 SettingWithCopyWarning
         df = df.copy()
             
-        # 确保所有统一字段都存在，缺失的填充为 NaN
         for col in self.UNIFIED_COLUMNS:
             if col not in df.columns:
                 df[col] = pd.NA
         
-        # 按统一顺序排列列
         df = df[self.UNIFIED_COLUMNS]
         
-        # [修复] 使用 .loc 进行赋值，避免 SettingWithCopyWarning
         numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'amount', 
                        'amplitude', 'pct_change', 'change', 'turnover_rate']
         for col in numeric_cols:
@@ -166,39 +167,22 @@ class DataFetcher:
         
         return df
 
-    @retry(retries=2, delay=15)
-    def _fetch_from_network(self, fund_code):
-        """
-        [私有方法] 纯联网获取数据 (东财 -> 新浪 -> 腾讯)
-        所有数据源统一返回标准字段结构
-        [优化 V15.20] 使用短连接 + 随机 UA，每次请求后断开
-        """
-        fetch_time = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+    @retry(retries=2, delay=20)
+    def _fetch_eastmoney(self, fund_code, fetch_time):
+        """[V16.0 隔离方法] 单独获取东财数据"""
+        logger.info(f"🌐 [东财] 建立全新连接获取 {fund_code}...")
         
-        # 1. 东财 (EastMoney) - 优先数据源，字段最全
-        # [优化 V15.20] 使用短连接，随机 UA，请求后立即断开
+        # 创建隔离 session
+        session = self._create_isolated_session()
+        
         try:
-            # 随机延时
-            sleep_time = random.uniform(3.0, 7.0)
-            logger.info(f"⏳ 预等待 {sleep_time:.1f}s...")
-            time.sleep(sleep_time)
-            
-            logger.info(f"🌐 [东财] 发起新连接获取 {fund_code}...")
-            
-            # [关键 V15.20] 创建新的短连接 session
-            session = self._create_short_session()
-            
-            # 通过 akshare 的 session 机制注入我们的 headers
-            # 注意：akshare 底层可能使用 requests，我们尝试设置全局 headers
-            original_headers = getattr(ak, '_HEADERS', None)
-            
+            # 尝试修改 akshare 内部使用的 headers
             try:
-                # 尝试临时修改 akshare 的请求头（如果它暴露了这个接口）
                 ak._HEADERS = self._get_random_headers()
             except:
                 pass
             
-            # 调用 akshare 接口
+            # 调用接口
             df = ak.fund_etf_hist_em(
                 symbol=fund_code, 
                 period="daily", 
@@ -207,129 +191,8 @@ class DataFetcher:
                 adjust="qfq"
             )
             
-            # 恢复原始 headers
-            try:
-                if original_headers:
-                    ak._HEADERS = original_headers
-            except:
-                pass
-            
-            # [关键 V15.20] 立即关闭连接
-            self._close_session()
-            logger.info(f"🔌 [东财] 连接已关闭")
-            
-            # 东财字段映射（最全）
-            rename_map = {
-                '日期': 'date',
-                '开盘': 'open',
-                '收盘': 'close',
-                '最高': 'high',
-                '最低': 'low',
-                '成交量': 'volume',
-                '成交额': 'amount',
-                '振幅': 'amplitude',
-                '涨跌幅': 'pct_change',
-                '涨跌额': 'change',
-                '换手率': 'turnover_rate'
-            }
-            df.rename(columns=rename_map, inplace=True)
-            df['date'] = pd.to_datetime(df['date'])
-            df.set_index('date', inplace=True)
-            df['fetch_time'] = fetch_time
-            df['source'] = 'eastmoney'
-            
-            df = self._standardize_dataframe(df, "东财")
-            if not df.empty: 
-                return df, "东财"
-                
-        except (ConnectionError, requests.exceptions.ConnectionError, 
-                requests.exceptions.ChunkedEncodingError, requests.exceptions.SSLError) as e:
-            logger.error(f"❌ 东财连接被重置 (反爬拦截): {e}")
-            self._close_session()  # 确保关闭
-            # 不抛出异常，让程序继续走下面的新浪逻辑
-        except Exception as e:
-            logger.error(f"⚠️ 东财数据源异常: {e}")
-            self._close_session()  # 确保关闭
-            pass
-
-        # 2. 新浪 (Sina) - 备用源，更稳定
-        try:
-            time.sleep(random.uniform(2.0, 5.0))
-            logger.info(f"🌐 [新浪] 获取 {fund_code}...")
-            
-            # 新浪通常较稳定，但我们也用短连接
-            session = self._create_short_session()
-            
-            df = ak.fund_etf_hist_sina(symbol=fund_code)
-            
-            self._close_session()
-            logger.info(f"🔌 [新浪] 连接已关闭")
-            
-            if df.index.name in ['date', '日期']: 
-                df = df.reset_index()
-            
-            # 新浪返回字段需智能识别
-            col_mapping = {}
-            for col in df.columns:
-                col_str = str(col).lower()
-                if col_str in ['date', '日期']:
-                    col_mapping[col] = 'date'
-                elif col_str in ['open', '开盘']:
-                    col_mapping[col] = 'open'
-                elif col_str in ['close', '收盘', 'latest']:
-                    col_mapping[col] = 'close'
-                elif col_str in ['high', '最高']:
-                    col_mapping[col] = 'high'
-                elif col_str in ['low', '最低']:
-                    col_mapping[col] = 'low'
-                elif col_str in ['volume', '成交量', 'vol']:
-                    col_mapping[col] = 'volume'
-            
-            df.rename(columns=col_mapping, inplace=True)
-            
-            if 'date' in df.columns:
-                df['date'] = pd.to_datetime(df['date'])
-                df.set_index('date', inplace=True)
-                
-                # 新浪缺失字段填充为 NaN
-                df['amount'] = pd.NA
-                df['amplitude'] = pd.NA
-                df['pct_change'] = pd.NA
-                df['change'] = pd.NA
-                df['turnover_rate'] = pd.NA
-                df['fetch_time'] = fetch_time
-                df['source'] = 'sina'
-                
-                # [修复] 使用 .loc 进行赋值
-                for col in ['open', 'high', 'low', 'close', 'volume']:
-                    if col in df.columns: 
-                        df.loc[:, col] = pd.to_numeric(df[col], errors='coerce')
-                
-                df = self._standardize_dataframe(df, "新浪")
-                return df, "新浪"
-        except Exception as e:
-            logger.error(f"⚠️ 新浪数据源异常: {e}")
-            self._close_session()
-            pass
-
-        # 3. 腾讯 (Tencent) - 最后的防线
-        try:
-            time.sleep(random.uniform(2.0, 5.0))
-            logger.info(f"🌐 [腾讯] 获取 {fund_code}...")
-            
-            session = self._create_short_session()
-            
-            prefix = 'sh' if fund_code.startswith('5') else ('sz' if fund_code.startswith('1') else '')
-            if prefix:
-                df = ak.stock_zh_a_hist_tx(
-                    symbol=f"{prefix}{fund_code}", 
-                    start_date="20200101", 
-                    adjust="qfq"
-                )
-                
-                self._close_session()
-                logger.info(f"🔌 [腾讯] 连接已关闭")
-                
+            if df is not None and not df.empty:
+                # 字段映射
                 rename_map = {
                     '日期': 'date',
                     '开盘': 'open',
@@ -347,27 +210,158 @@ class DataFetcher:
                 df['date'] = pd.to_datetime(df['date'])
                 df.set_index('date', inplace=True)
                 df['fetch_time'] = fetch_time
-                df['source'] = 'tencent'
+                df['source'] = 'eastmoney'
                 
-                df = self._standardize_dataframe(df, "腾讯")
-                if not df.empty: 
+                df = self._standardize_dataframe(df, "东财")
+                return df, "东财"
+                
+        finally:
+            # [关键 V16.0] 无论成功失败，都强制清理
+            session.close()
+            force_close_connections()
+            logger.info(f"🔌 [东财] 连接已彻底销毁")
+
+    @retry(retries=2, delay=10)
+    def _fetch_sina(self, fund_code, fetch_time):
+        """[V16.0 隔离方法] 单独获取新浪数据"""
+        logger.info(f"🌐 [新浪] 获取 {fund_code}...")
+        
+        session = self._create_isolated_session()
+        
+        try:
+            df = ak.fund_etf_hist_sina(symbol=fund_code)
+            
+            if df is not None and not df.empty:
+                if df.index.name in ['date', '日期']: 
+                    df = df.reset_index()
+                
+                col_mapping = {}
+                for col in df.columns:
+                    col_str = str(col).lower()
+                    if col_str in ['date', '日期']:
+                        col_mapping[col] = 'date'
+                    elif col_str in ['open', '开盘']:
+                        col_mapping[col] = 'open'
+                    elif col_str in ['close', '收盘', 'latest']:
+                        col_mapping[col] = 'close'
+                    elif col_str in ['high', '最高']:
+                        col_mapping[col] = 'high'
+                    elif col_str in ['low', '最低']:
+                        col_mapping[col] = 'low'
+                    elif col_str in ['volume', '成交量', 'vol']:
+                        col_mapping[col] = 'volume'
+                
+                df.rename(columns=col_mapping, inplace=True)
+                
+                if 'date' in df.columns:
+                    df['date'] = pd.to_datetime(df['date'])
+                    df.set_index('date', inplace=True)
+                    
+                    df['amount'] = pd.NA
+                    df['amplitude'] = pd.NA
+                    df['pct_change'] = pd.NA
+                    df['change'] = pd.NA
+                    df['turnover_rate'] = pd.NA
+                    df['fetch_time'] = fetch_time
+                    df['source'] = 'sina'
+                    
+                    for col in ['open', 'high', 'low', 'close', 'volume']:
+                        if col in df.columns: 
+                            df.loc[:, col] = pd.to_numeric(df[col], errors='coerce')
+                    
+                    df = self._standardize_dataframe(df, "新浪")
+                    return df, "新浪"
+        finally:
+            session.close()
+            force_close_connections()
+            logger.info(f"🔌 [新浪] 连接已关闭")
+
+    @retry(retries=2, delay=10)
+    def _fetch_tencent(self, fund_code, fetch_time):
+        """[V16.0 隔离方法] 单独获取腾讯数据"""
+        logger.info(f"🌐 [腾讯] 获取 {fund_code}...")
+        
+        session = self._create_isolated_session()
+        
+        try:
+            prefix = 'sh' if fund_code.startswith('5') else ('sz' if fund_code.startswith('1') else '')
+            if prefix:
+                df = ak.stock_zh_a_hist_tx(
+                    symbol=f"{prefix}{fund_code}", 
+                    start_date="20200101", 
+                    adjust="qfq"
+                )
+                
+                if df is not None and not df.empty:
+                    rename_map = {
+                        '日期': 'date',
+                        '开盘': 'open',
+                        '收盘': 'close',
+                        '最高': 'high',
+                        '最低': 'low',
+                        '成交量': 'volume',
+                        '成交额': 'amount',
+                        '振幅': 'amplitude',
+                        '涨跌幅': 'pct_change',
+                        '涨跌额': 'change',
+                        '换手率': 'turnover_rate'
+                    }
+                    df.rename(columns=rename_map, inplace=True)
+                    df['date'] = pd.to_datetime(df['date'])
+                    df.set_index('date', inplace=True)
+                    df['fetch_time'] = fetch_time
+                    df['source'] = 'tencent'
+                    
+                    df = self._standardize_dataframe(df, "腾讯")
                     return df, "腾讯"
+        finally:
+            session.close()
+            force_close_connections()
+            logger.info(f"🔌 [腾讯] 连接已关闭")
+
+    def _fetch_from_network(self, fund_code):
+        """[V16.0] 主获取逻辑：东财 -> 新浪 -> 腾讯"""
+        fetch_time = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 1. 东财
+        try:
+            wait = random.uniform(5.0, 10.0)
+            logger.info(f"⏳ 预等待 {wait:.1f}s...")
+            time.sleep(wait)
+            
+            df, source = self._fetch_eastmoney(fund_code, fetch_time)
+            if df is not None and not df.empty:
+                return df, source
         except Exception as e:
-            logger.error(f"⚠️ 腾讯数据源异常: {e}")
-            self._close_session()
-            pass
+            logger.error(f"❌ 东财失败: {e}")
+            force_close_connections()
+
+        # 2. 新浪
+        try:
+            time.sleep(random.uniform(3.0, 6.0))
+            df, source = self._fetch_sina(fund_code, fetch_time)
+            if df is not None and not df.empty:
+                return df, source
+        except Exception as e:
+            logger.error(f"⚠️ 新浪失败: {e}")
+
+        # 3. 腾讯
+        try:
+            time.sleep(random.uniform(3.0, 6.0))
+            df, source = self._fetch_tencent(fund_code, fetch_time)
+            if df is not None and not df.empty:
+                return df, source
+        except Exception as e:
+            logger.error(f"⚠️ 腾讯失败: {e}")
         
         return None, None
 
     def update_cache(self, fund_code):
-        """
-        [爬虫专用] 联网下载数据并保存到本地 CSV
-        """
+        """[V16.0] 更新单个基金数据"""
         df, source = self._fetch_from_network(fund_code)
         
-        # 处理 retry 装饰器返回 (None, None) 的情况
         if df is None:
-            logger.error(f"❌ {fund_code} 所有数据源(东财/新浪/腾讯)均获取失败")
+            logger.error(f"❌ {fund_code} 所有数据源均获取失败")
             return False
 
         if not df.empty:
@@ -375,10 +369,10 @@ class DataFetcher:
             df.to_csv(file_path)
             logger.info(f"💾 [{source}] {fund_code} 数据已保存至 {file_path}")
             
-            # [优化 V15.20] 如果是东财数据，强制等待 25-35 秒 (随机化，应对反爬)
+            # [V16.0] 东财成功后等待 40-60 秒
             if source == "东财":
-                wait_time = random.uniform(25, 35)
-                logger.info(f"⏳ [东财] 触发频率保护，等待 {wait_time:.1f}s...")
+                wait_time = random.uniform(40, 60)
+                logger.info(f"⏳ [东财] 强制冷却 {wait_time:.1f}s...")
                 time.sleep(wait_time)
             
             return True
@@ -387,9 +381,7 @@ class DataFetcher:
             return False
 
     def get_fund_history(self, fund_code, days=250):
-        """
-        [主程序专用] 只读模式：直接从本地 CSV 读取数据
-        """
+        """读取本地缓存"""
         file_path = os.path.join(self.DATA_DIR, f"{fund_code}.csv")
         
         if not os.path.exists(file_path):
@@ -410,10 +402,10 @@ class DataFetcher:
             return None
 
 # ==========================================
-# [新增] 独立运行入口 (让此脚本变身爬虫)
+# [V16.0] 主程序入口 - 随机顺序获取
 # ==========================================
 if __name__ == "__main__":
-    print("🚀 [DataFetcher] 启动多源行情抓取 (V15.20 Short-Connection Mode)...")
+    print("🚀 [DataFetcher] 启动多源行情抓取 (V16.0 Random-Order + Hard-Reset Mode)...")
     
     def load_config_local():
         try:
@@ -429,20 +421,31 @@ if __name__ == "__main__":
         print("⚠️ 未找到基金列表，请检查 config.yaml")
         exit()
 
+    # [关键 V16.0] 随机打乱获取顺序
+    random.shuffle(funds)
+    logger.info(f"🎲 随机获取顺序: {[f.get('code') for f in funds]}")
+
     fetcher = DataFetcher()
     success_count = 0
     
-    for fund in funds:
+    for idx, fund in enumerate(funds):
         code = fund.get('code')
         name = fund.get('name')
-        print(f"🔄 更新: {name} ({code})...")
+        print(f"🔄 [{idx+1}/{len(funds)}] 更新: {name} ({code})...")
         
         try:
             if fetcher.update_cache(code):
                 success_count += 1
-            # 基础间隔，防止多源切换时也过快
-            time.sleep(random.uniform(3.0, 6.0))
+            
+            # 基金间基础间隔（东财成功的话已经在 update_cache 里等了 40-60s）
+            if idx < len(funds) - 1:
+                base_wait = random.uniform(5.0, 10.0)
+                logger.info(f"⏳ 基础间隔等待 {base_wait:.1f}s...")
+                time.sleep(base_wait)
+                
         except Exception as e:
             print(f"❌ 更新异常 {name}: {e}")
+            force_close_connections()
+            time.sleep(random.uniform(10, 15))
             
-    print(f"🏁 行情更新完成: {success_count}/{len(funds)} (短连接模式)")
+    print(f"🏁 行情更新完成: {success_count}/{len(funds)} (随机顺序 + 硬重置模式)")
