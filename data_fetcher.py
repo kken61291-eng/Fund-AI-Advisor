@@ -157,20 +157,21 @@ class DataFetcher:
         page = 1
         consecutive_errors = 0
         
-        logger.info("📡 开始获取 ETF 全量列表 (Via ScraperAPI)...")
+        logger.info("📡 开始获取 ETF 全量列表 (含债券/商品/跨境)...")
         
         while page <= 200 and consecutive_errors < 3:
             if page % 10 == 0:
                 logger.info(f"📄 获取第 {page} 页...")
             
+            # 修正点：移除 invt 和 fltt 参数，以获取所有类型的 ETF
             params = {
                 "pn": str(page),
                 "pz": "100",
                 "po": "1",
                 "np": "1",
                 "ut": "bd1d9ddb04089700cf9c27f6f7426281",
-                "fltt": "2",
-                "invt": "2",
+                # "fltt": "2",  <-- 已移除：防止过滤掉债券/商品ETF
+                # "invt": "2",  <-- 已移除：防止过滤掉非权益类ETF
                 "fid": "f3",
                 "fs": "b:MK0021,b:MK0022,b:MK0023,b:MK0024",
                 "fields": "f12,f14,f2,f3,f4,f5,f6,f7,f8,f15,f16,f17,f18",
@@ -198,7 +199,7 @@ class DataFetcher:
                 break
                 
             all_data.extend(items)
-            logger.info(f"   ✅ 本页 {len(items)} 条")
+            # logger.info(f"   ✅ 本页 {len(items)} 条")
             
             if len(items) < 100:
                 break
@@ -219,11 +220,11 @@ class DataFetcher:
             'f8': 'turnover_rate', 'f17': 'open', 'f15': 'high', 'f16': 'low',
         }
         df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns}, inplace=True)
-        # 兼容性处理：防止空数据报错
+        
         if 'code' in df.columns:
             df['code'] = df['code'].astype(str).str.strip().str.lower().str.replace(r'^(sh|sz)', '', regex=True)
             df = df.drop_duplicates(subset=['code'], keep='first')
-            logger.info(f"✅ 共获取 {len(df)} 只 ETF")
+            logger.info(f"✅ 共获取 {len(df)} 只 ETF (全类型)")
             return df.set_index('code')
         else:
             return None
@@ -249,7 +250,7 @@ class DataFetcher:
         code = str(fund_code).strip().lower().replace('sh', '').replace('sz', '')
         
         if code not in self.spot_data_cache.index:
-            logger.warning(f"⚠️ 未找到 {fund_code}")
+            logger.warning(f"⚠️ 未找到 {fund_code} (可能是已退市或代码错误)")
             return False
         
         try:
@@ -308,7 +309,6 @@ class DataFetcher:
         
         # 测试网络
         logger.info("🔍 正在连接 ScraperAPI ...")
-        # 测试一个简单的 API 确保代理通畅
         test = self._safe_request("https://push2.eastmoney.com/api/qt/clist/get", 
                                   {"pn":"1","pz":"1","fs":"b:MK0021"}, {}, max_retries=2)
         if not test:
@@ -333,7 +333,7 @@ class DataFetcher:
 # ===================== 主入口 =====================
 if __name__ == "__main__":
     print("=" * 60)
-    print("🚀 DataFetcher V23.1 (ScraperAPI Hardcoded)")
+    print("🚀 DataFetcher V23.2 (All-Types Support)")
     print("=" * 60)
     
     # 模拟配置 (如果没找到config文件)
