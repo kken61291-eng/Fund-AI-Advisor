@@ -2,8 +2,9 @@ name: Daily Data Crawler
 
 on:
   schedule:
-    # 每小时第 30 分钟运行 (注意：GitHub 可能有 10-30 分钟延迟)
-    - cron: '30 * * * *'
+    # 北京时间工作日 11:00, 12:00, 13:00, 14:00 运行
+    # GitHub Actions 使用 UTC 时间，对应为 03:00, 04:00, 05:00, 06:00
+    - cron: '0 3-6 * * 1-5'
   workflow_dispatch:
 
 # 必须赋予写入权限
