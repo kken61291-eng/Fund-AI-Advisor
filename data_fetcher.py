@@ -37,27 +37,37 @@ def retry(retries=3, delay=10):
     return decorator
 
 def force_close_connections():
-    """[新增 V16.0] 强制关闭所有网络连接和连接池"""
+    """[V17.0] 强制关闭所有网络连接"""
     try:
-        # 关闭 akshare 可能使用的全局 session
         if hasattr(ak, '_session') and ak._session:
             try:
                 ak._session.close()
                 ak._session = None
             except:
                 pass
-        
-        # 触发垃圾回收，确保连接被释放
         gc.collect()
-        
-        # 短暂暂停让操作系统回收端口
         time.sleep(0.5)
     except Exception as e:
         logger.debug(f"关闭连接时出错: {e}")
+
+# [新增 V17.0] 使用 curl_cffi 创建模拟浏览器会话
+def create_browser_session():
+    """创建模拟 Chrome 浏览器的 curl_cffi 会话，绕过 TLS 指纹检测"""
+    try:
+        from curl_cffi import requests as curl_requests
+        
+        # 模拟 Chrome 120 的 TLS 指纹
+        session = curl_requests.Session(
+            impersonate="chrome120",  # 关键：模拟真实浏览器指纹
+            timeout=30
+        )
+        return session
+    except ImportError:
+        logger.warning("curl_cffi 未安装，回退到普通 requests")
+        return None
 # ====================================================================
 
 class DataFetcher:
-    # [V16.0] 统一字段规范
     UNIFIED_COLUMNS = [
         'date', 'open', 'high', 'low', 'close', 'volume',
         'amount', 'amplitude', 'pct_change', 'change', 'turnover_rate',
@@ -69,20 +79,19 @@ class DataFetcher:
         if not os.path.exists(self.DATA_DIR):
             os.makedirs(self.DATA_DIR)
             
-        # [V16.0] 扩充 User-Agent 池
+        # [V17.0] 扩充 User-Agent 池，增加移动端
         self.user_agents = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0",
             "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
+            "Mozilla/5.0 (iPad; CPU OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
         ]
 
     def _get_random_headers(self):
-        """[V16.0] 生成随机请求头"""
+        """生成随机请求头"""
         ua = random.choice(self.user_agents)
         return {
             'User-Agent': ua,
@@ -99,28 +108,6 @@ class DataFetcher:
             'Cache-Control': 'no-cache',
             'Pragma': 'no-cache',
         }
-
-    def _create_isolated_session(self):
-        """[V16.0] 创建完全隔离的短连接 session"""
-        # 先强制清理现有连接
-        force_close_connections()
-        
-        # 创建新 session，禁用连接池
-        session = requests.Session()
-        
-        # [关键] 禁用 keep-alive，强制短连接
-        adapter = requests.adapters.HTTPAdapter(
-            pool_connections=0,  # 禁用连接池
-            pool_maxsize=0,
-            max_retries=0,
-        )
-        session.mount('http://', adapter)
-        session.mount('https://', adapter)
-        
-        # 设置随机请求头
-        session.headers.update(self._get_random_headers())
-        
-        return session
 
     def _verify_data_freshness(self, df, fund_code, source_name):
         """数据新鲜度审计"""
@@ -140,14 +127,14 @@ class DataFetcher:
             elif last_date < today_date:
                 days_gap = (today_date - last_date).days
                 if is_trading_time and days_gap >= 1:
-                    logger.warning(f"{log_prefix} | ⚠️ 数据滞后 {days_gap} 天 (请运行爬虫更新)")
+                    logger.warning(f"{log_prefix} | ⚠️ 数据滞后 {days_gap} 天")
                 else:
                     logger.info(f"{log_prefix} | ⏸️ 历史数据就绪")
         except Exception as e:
             logger.warning(f"审计数据新鲜度失败: {e}")
 
     def _standardize_dataframe(self, df, source_name):
-        """[V16.0] 标准化 DataFrame"""
+        """标准化 DataFrame"""
         if df is None or df.empty:
             return df
         
@@ -167,20 +154,25 @@ class DataFetcher:
         
         return df
 
-    @retry(retries=2, delay=20)
+    @retry(retries=2, delay=25)
     def _fetch_eastmoney(self, fund_code, fetch_time):
-        """[V16.0 隔离方法] 单独获取东财数据"""
-        logger.info(f"🌐 [东财] 建立全新连接获取 {fund_code}...")
-        
-        # 创建隔离 session
-        session = self._create_isolated_session()
+        """[V17.0] 使用 curl_cffi 模拟浏览器获取东财数据"""
+        logger.info(f"🌐 [东财] 模拟浏览器获取 {fund_code}...")
         
         try:
-            # 尝试修改 akshare 内部使用的 headers
-            try:
-                ak._HEADERS = self._get_random_headers()
-            except:
-                pass
+            # [关键 V17.0] 使用 curl_cffi 的浏览器模拟功能
+            # 这会自动处理 TLS 指纹、HTTP/2 等
+            browser_session = create_browser_session()
+            
+            if browser_session:
+                # 使用 curl_cffi 时，通过 akshare 的底层机制注入
+                # 注意：akshare 1.18+ 内部使用了 curl_cffi，我们尝试设置其 session
+                try:
+                    # 尝试替换 akshare 内部 session
+                    original_session = getattr(ak, '_session', None)
+                    ak._session = browser_session
+                except:
+                    browser_session = None
             
             # 调用接口
             df = ak.fund_etf_hist_em(
@@ -191,8 +183,14 @@ class DataFetcher:
                 adjust="qfq"
             )
             
+            # 恢复原始 session
+            try:
+                if browser_session and original_session:
+                    ak._session = original_session
+            except:
+                pass
+            
             if df is not None and not df.empty:
-                # 字段映射
                 rename_map = {
                     '日期': 'date',
                     '开盘': 'open',
@@ -216,17 +214,13 @@ class DataFetcher:
                 return df, "东财"
                 
         finally:
-            # [关键 V16.0] 无论成功失败，都强制清理
-            session.close()
             force_close_connections()
-            logger.info(f"🔌 [东财] 连接已彻底销毁")
+            logger.info(f"🔌 [东财] 会话已清理")
 
-    @retry(retries=2, delay=10)
+    @retry(retries=2, delay=15)
     def _fetch_sina(self, fund_code, fetch_time):
-        """[V16.0 隔离方法] 单独获取新浪数据"""
+        """[V17.0] 获取新浪数据"""
         logger.info(f"🌐 [新浪] 获取 {fund_code}...")
-        
-        session = self._create_isolated_session()
         
         try:
             df = ak.fund_etf_hist_sina(symbol=fund_code)
@@ -272,16 +266,13 @@ class DataFetcher:
                     df = self._standardize_dataframe(df, "新浪")
                     return df, "新浪"
         finally:
-            session.close()
             force_close_connections()
             logger.info(f"🔌 [新浪] 连接已关闭")
 
-    @retry(retries=2, delay=10)
+    @retry(retries=2, delay=15)
     def _fetch_tencent(self, fund_code, fetch_time):
-        """[V16.0 隔离方法] 单独获取腾讯数据"""
+        """[V17.0] 获取腾讯数据"""
         logger.info(f"🌐 [腾讯] 获取 {fund_code}...")
-        
-        session = self._create_isolated_session()
         
         try:
             prefix = 'sh' if fund_code.startswith('5') else ('sz' if fund_code.startswith('1') else '')
@@ -315,17 +306,16 @@ class DataFetcher:
                     df = self._standardize_dataframe(df, "腾讯")
                     return df, "腾讯"
         finally:
-            session.close()
             force_close_connections()
             logger.info(f"🔌 [腾讯] 连接已关闭")
 
     def _fetch_from_network(self, fund_code):
-        """[V16.0] 主获取逻辑：东财 -> 新浪 -> 腾讯"""
+        """[V17.0] 主获取逻辑：东财 -> 新浪 -> 腾讯"""
         fetch_time = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
         
-        # 1. 东财
+        # 1. 东财 - 使用浏览器模拟
         try:
-            wait = random.uniform(5.0, 10.0)
+            wait = random.uniform(8.0, 15.0)  # [V17.0] 增加初始等待
             logger.info(f"⏳ 预等待 {wait:.1f}s...")
             time.sleep(wait)
             
@@ -338,7 +328,7 @@ class DataFetcher:
 
         # 2. 新浪
         try:
-            time.sleep(random.uniform(3.0, 6.0))
+            time.sleep(random.uniform(5.0, 10.0))
             df, source = self._fetch_sina(fund_code, fetch_time)
             if df is not None and not df.empty:
                 return df, source
@@ -347,7 +337,7 @@ class DataFetcher:
 
         # 3. 腾讯
         try:
-            time.sleep(random.uniform(3.0, 6.0))
+            time.sleep(random.uniform(5.0, 10.0))
             df, source = self._fetch_tencent(fund_code, fetch_time)
             if df is not None and not df.empty:
                 return df, source
@@ -357,7 +347,7 @@ class DataFetcher:
         return None, None
 
     def update_cache(self, fund_code):
-        """[V16.0] 更新单个基金数据"""
+        """[V17.0] 更新单个基金数据"""
         df, source = self._fetch_from_network(fund_code)
         
         if df is None:
@@ -369,9 +359,9 @@ class DataFetcher:
             df.to_csv(file_path)
             logger.info(f"💾 [{source}] {fund_code} 数据已保存至 {file_path}")
             
-            # [V16.0] 东财成功后等待 40-60 秒
+            # [V17.0] 东财成功后等待 50-70 秒（更保守）
             if source == "东财":
-                wait_time = random.uniform(40, 60)
+                wait_time = random.uniform(50, 70)
                 logger.info(f"⏳ [东财] 强制冷却 {wait_time:.1f}s...")
                 time.sleep(wait_time)
             
@@ -385,7 +375,7 @@ class DataFetcher:
         file_path = os.path.join(self.DATA_DIR, f"{fund_code}.csv")
         
         if not os.path.exists(file_path):
-            logger.warning(f"⚠️ 本地缓存缺失: {fund_code}，请等待 GitHub Action 爬虫运行")
+            logger.warning(f"⚠️ 本地缓存缺失: {fund_code}")
             return None
             
         try:
@@ -402,10 +392,10 @@ class DataFetcher:
             return None
 
 # ==========================================
-# [V16.0] 主程序入口 - 随机顺序获取
+# [V17.0] 主程序入口 - 随机顺序 + 浏览器模拟
 # ==========================================
 if __name__ == "__main__":
-    print("🚀 [DataFetcher] 启动多源行情抓取 (V16.0 Random-Order + Hard-Reset Mode)...")
+    print("🚀 [DataFetcher] 启动 (V17.0 Browser-Impersonate Mode)...")
     
     def load_config_local():
         try:
@@ -421,7 +411,7 @@ if __name__ == "__main__":
         print("⚠️ 未找到基金列表，请检查 config.yaml")
         exit()
 
-    # [关键 V16.0] 随机打乱获取顺序
+    # 随机打乱获取顺序
     random.shuffle(funds)
     logger.info(f"🎲 随机获取顺序: {[f.get('code') for f in funds]}")
 
@@ -437,7 +427,7 @@ if __name__ == "__main__":
             if fetcher.update_cache(code):
                 success_count += 1
             
-            # 基金间基础间隔（东财成功的话已经在 update_cache 里等了 40-60s）
+            # 基金间基础间隔
             if idx < len(funds) - 1:
                 base_wait = random.uniform(5.0, 10.0)
                 logger.info(f"⏳ 基础间隔等待 {base_wait:.1f}s...")
@@ -446,6 +436,6 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"❌ 更新异常 {name}: {e}")
             force_close_connections()
-            time.sleep(random.uniform(10, 15))
+            time.sleep(random.uniform(15, 20))
             
-    print(f"🏁 行情更新完成: {success_count}/{len(funds)} (随机顺序 + 硬重置模式)")
+    print(f"🏁 完成: {success_count}/{len(funds)} (浏览器模拟模式)")
