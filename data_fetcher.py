@@ -273,10 +273,10 @@ class DataFetcher:
             df.to_csv(file_path)
             logger.info(f"💾 [{source}] {fund_code} 数据已保存至 {file_path}")
             
-            # [关键优化] 如果是东财数据，强制等待 65 秒 (应对最近的反爬升级)
+            # [关键优化] 如果是东财数据，强制等待 90 秒 (应对最近的反爬升级)
             if source == "东财":
                 logger.info("⏳ [东财] 触发频率保护机制，强制等待 65 秒...")
-                time.sleep(65)
+                time.sleep(90)
             
             return True
         else:
