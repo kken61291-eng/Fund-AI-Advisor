@@ -1,53 +1,51 @@
-import akshare as ak
 import pandas as pd
 import time
 import random
 import os
 import yaml
 import logging
-import requests
 import gc
-from datetime import datetime, time as dt_time, date
+import json
+from datetime import datetime, time as dt_time
+from typing import Optional, Tuple
 
-# ===================== 工具函数 (保持不变) =====================
+# [关键依赖] 引入 curl_cffi 模拟浏览器指纹
+try:
+    from curl_cffi import requests as cffi_requests
+    from curl_cffi.requests.exceptions import RequestException
+except ImportError:
+    raise ImportError("请先安装 curl_cffi: pip install curl_cffi>=0.5.10")
+
+# ===================== 工具函数 =====================
 def get_beijing_time():
+    """获取北京时间"""
     from datetime import timezone, timedelta
     return datetime.now(timezone(timedelta(hours=8)))
 
+# 配置日志
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
-def retry(retries=3, delay=10):
+def retry(retries: int = 3, delay: float = 5.0):
+    """重试装饰器"""
     def decorator(func):
         def wrapper(*args, **kwargs):
             for i in range(retries):
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
-                    logger.warning(f"⚠️ [Retry {i+1}/{retries}] 操作失败: {e}, 等待 {delay}s 后重试...")
-                    if i == retries - 1:
-                        logger.error(f"❌ 重试耗尽，最终失败: {e}")
-                        return None, None 
-                    time.sleep(delay)
+                    logger.warning(f"⚠️ [Retry {i+1}/{retries}] {func.__name__} 失败: {e}")
+                    if i < retries - 1:
+                        time.sleep(delay * (i + 1))  # 递增延迟
+            logger.error(f"❌ {func.__name__} 重试耗尽")
             return None
         return wrapper
     return decorator
 
-def force_close_connections():
-    try:
-        if hasattr(ak, '_session') and ak._session:
-            try:
-                ak._session.close()
-                ak._session = None
-            except:
-                pass
-        gc.collect()
-        time.sleep(0.5)
-    except Exception as e:
-        logger.debug(f"关闭连接时出错: {e}")
-
-# ===================== DataFetcher 类 (核心修改) =====================
-
+# ===================== DataFetcher 类 =====================
 class DataFetcher:
     UNIFIED_COLUMNS = [
         'date', 'open', 'high', 'low', 'close', 'volume',
@@ -57,93 +55,216 @@ class DataFetcher:
     
     def __init__(self):
         self.DATA_DIR = "data_cache"
-        if not os.path.exists(self.DATA_DIR):
-            os.makedirs(self.DATA_DIR)
+        os.makedirs(self.DATA_DIR, exist_ok=True)
         
-        # [修改点1] 增加 Spot 数据缓存变量
-        self.spot_data_cache = None
-        self.spot_data_date = None
+        # 缓存全市场数据
+        self.spot_data_cache: Optional[pd.DataFrame] = None
+        self.spot_data_date: Optional[str] = None
+        
+        # 创建 session 复用（curl_cffi 支持）
+        self.session = cffi_requests.Session(impersonate="chrome120")
 
-    def _standardize_dataframe(self, df, source_name):
-        """标准化 DataFrame格式"""
+    def __del__(self):
+        """清理 session"""
+        if hasattr(self, 'session'):
+            try:
+                self.session.close()
+            except:
+                pass
+
+    def _standardize_dataframe(self, df: pd.DataFrame, source_name: str) -> pd.DataFrame:
+        """标准化 DataFrame 格式"""
         if df is None or df.empty:
             return df
+        
         df = df.copy()
+        
+        # 确保所有统一字段都存在
         for col in self.UNIFIED_COLUMNS:
             if col not in df.columns:
                 df[col] = pd.NA
+        
+        # 按统一顺序排列
         df = df[self.UNIFIED_COLUMNS]
-        # 强制转为数字类型，防止出现字符串
+        
+        # 强制转为数字类型
         numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'amount', 
                        'amplitude', 'pct_change', 'change', 'turnover_rate']
         for col in numeric_cols:
             if col in df.columns:
                 df.loc[:, col] = pd.to_numeric(df[col], errors='coerce')
+        
         return df
 
-    def _init_spot_data(self):
-        """[新增] 仅在启动时运行一次：拉取全市场 ETF 实时行情"""
-        today_str = datetime.now().strftime("%Y-%m-%d")
+    @retry(retries=3, delay=5)
+    def _fetch_eastmoney_raw_spot(self) -> Optional[pd.DataFrame]:
+        """
+        [核心黑科技] 使用 curl_cffi 直接请求东财原始接口
+        绕过 Akshare，直接模拟 Chrome 120 获取全市场 ETF 数据
+        """
+        # [修复] URL 去除空格
+        url = "https://push2.eastmoney.com/api/qt/clist/get"
         
-        # 如果缓存里已经有今天的数据，直接跳过
+        # 东财 ETF 板块参数
+        params = {
+            "pn": "1",
+            "pz": "5000",  # 一次拉取 5000 只，覆盖所有 ETF
+            "po": "1",
+            "np": "1",
+            "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+            "fltt": "2",
+            "invt": "2",
+            "fid": "f3",
+            "fs": "b:MK0021,b:MK0022,b:MK0023,b:MK0024",  # 涵盖所有场内基金
+            # [修复] 补充完整字段：f7=振幅, f8=换手率
+            "fields": "f12,f14,f2,f3,f4,f5,f6,f7,f8,f15,f16,f17,f18",
+            "_": str(int(time.time() * 1000))
+        }
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            # [修复] Referer 去除空格
+            "Referer": "http://quote.eastmoney.com/",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+
+        logger.info("🚀 [黑科技] 正在伪装 Chrome 请求东财全市场数据...")
+        
+        try:
+            # [关键] impersonate="chrome120" 让服务器认为这是真实浏览器
+            r = self.session.get(
+                url, 
+                params=params, 
+                headers=headers, 
+                timeout=15
+            )
+            
+            if r.status_code != 200:
+                logger.error(f"❌ 请求返回状态码: {r.status_code}, 响应: {r.text[:200]}")
+                return None
+
+            data_json = r.json()
+            
+            # 验证数据结构
+            if not data_json or data_json.get('rc') != 0:
+                logger.error(f"❌ 东财返回错误: {data_json.get('rt', '未知错误')}")
+                return None
+                
+            if 'data' not in data_json or 'diff' not in data_json['data']:
+                logger.error("❌ 东财返回数据格式异常")
+                return None
+                
+            raw_list = data_json['data']['diff']
+            
+            if not raw_list:
+                logger.warning("⚠️ 东财返回空列表")
+                return None
+            
+            # 转换为 DataFrame
+            df = pd.DataFrame(raw_list)
+            
+            # [修复] 完整字段映射
+            rename_map = {
+                'f12': 'code',          # 代码
+                'f14': 'name',          # 名称
+                'f2': 'close',          # 最新价
+                'f3': 'pct_change',     # 涨跌幅(%)
+                'f4': 'change',         # 涨跌额
+                'f5': 'volume',         # 成交量(手)
+                'f6': 'amount',         # 成交额
+                'f7': 'amplitude',      # [新增] 振幅(%)
+                'f8': 'turnover_rate',  # [修复] 换手率(%)
+                'f17': 'open',          # 开盘价
+                'f15': 'high',          # 最高价
+                'f16': 'low',           # 最低价
+                'f18': 'pre_close',     # 昨收
+            }
+            
+            # 只重命名存在的列
+            existing_cols = {k: v for k, v in rename_map.items() if k in df.columns}
+            df.rename(columns=existing_cols, inplace=True)
+            
+            # 确保 code 是字符串
+            df['code'] = df['code'].astype(str).str.strip()
+            
+            logger.info(f"✅ 获取到 {len(df)} 条数据，字段: {list(df.columns)}")
+            return df.set_index('code')
+
+        except RequestException as e:
+            logger.error(f"❌ [curl_cffi] 网络请求失败: {e}")
+            raise  # 让重试装饰器处理
+        except Exception as e:
+            logger.error(f"❌ [curl_cffi] 处理失败: {e}")
+            return None
+
+    def _init_spot_data(self) -> bool:
+        """初始化全市场数据（带缓存）"""
+        today_str = get_beijing_time().strftime("%Y-%m-%d")
+        
+        # 检查缓存
         if self.spot_data_cache is not None and self.spot_data_date == today_str:
+            logger.info("✅ 使用今日已缓存的 Spot 数据")
             return True
 
-        logger.info("🚀 [东财] 正在拉取全市场 ETF 实时快照 (Spot)...")
-        try:
-            # 这里的接口非常关键，获取所有 ETF 的当前价格
-            df = ak.fund_etf_spot_em()
-            
-            if df is not None and not df.empty:
-                # 建立代码索引，方便后续 O(1) 复杂度查找
-                # 注意：确保代码列是字符串类型
-                df['code'] = df['代码'].astype(str)
-                self.spot_data_cache = df.set_index('code')
-                self.spot_data_date = today_str
-                logger.info(f"✅ 全市场快照获取成功，共 {len(df)} 条数据")
-                return True
-            else:
-                logger.warning("⚠️ 全市场快照返回为空")
-        except Exception as e:
-            logger.error(f"❌ 全市场快照获取失败: {e}")
-            self.spot_data_cache = None
+        # 获取新数据
+        df = self._fetch_eastmoney_raw_spot()
+        if df is not None and not df.empty:
+            self.spot_data_cache = df
+            self.spot_data_date = today_str
+            logger.info(f"✅ 全市场快照缓存成功，共 {len(df)} 条")
+            return True
+        
+        logger.error("❌ 无法获取全市场数据")
         return False
 
-    def _fetch_eastmoney(self, fund_code, fetch_time):
-        """
-        [重写] 即使是获取东财数据，也不再请求网络，而是从 spot 缓存读取 + 拼接本地历史
-        """
-        # 1. 确保有全量缓存
+    def _safe_float(self, val, default: float = 0.0) -> float:
+        """安全转换为浮点数"""
+        if val is None or val == '-' or val == '':
+            return default
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return default
+
+    def update_cache(self, fund_code: str) -> bool:
+        """更新单个基金缓存"""
+        fetch_time = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 1. 确保全量数据已加载
         if self.spot_data_cache is None:
             if not self._init_spot_data():
-                return None, None # 初始化失败，后续会触发 failover 去跑新浪/腾讯
+                return False
 
-        # 2. 在缓存中查找当前基金
-        if fund_code not in self.spot_data_cache.index:
-            # 这种情况可能是代码填错了，或者该基金今日停牌/未上市
-            # logger.debug(f"⚠️ [Spot] 未找到 {fund_code}")
-            return None, None
+        # 2. 查找数据（兼容带市场前缀的代码）
+        clean_code = str(fund_code).strip()
+        if len(clean_code) > 6:
+            clean_code = clean_code[-6:]
+            
+        if clean_code not in self.spot_data_cache.index:
+            logger.warning(f"⚠️ 未找到 {fund_code} (clean: {clean_code})")
+            return False
 
         try:
-            # 3. 提取当日数据行
-            row = self.spot_data_cache.loc[fund_code]
+            row = self.spot_data_cache.loc[clean_code]
             
-            # 构造当日的 DataFrame (单行)
-            # 注意：Spot接口没有具体日期字段，默认归为"今天"
-            # 必须使用 .date() 确保索引对齐
-            today_date = pd.Timestamp(datetime.now().date())
+            # 3. 构造当日 DataFrame
+            today_date = pd.Timestamp(get_beijing_time().date())
             
             new_data = {
                 'date': today_date,
-                'open': row['开盘价'],
-                'high': row['最高价'],
-                'low': row['最低价'],
-                'close': row['最新价'],
-                'volume': row['成交量'],
-                'amount': row['成交额'],
-                'pct_change': row['涨跌幅'],
-                'change': row.get('涨跌额', 0),
-                'turnover_rate': row.get('换手率', 0),
+                'open': self._safe_float(row.get('open')),
+                'high': self._safe_float(row.get('high')),
+                'low': self._safe_float(row.get('low')),
+                'close': self._safe_float(row.get('close')),
+                'volume': self._safe_float(row.get('volume')),
+                'amount': self._safe_float(row.get('amount')),
+                'amplitude': self._safe_float(row.get('amplitude')),  # [新增]
+                'pct_change': self._safe_float(row.get('pct_change')),
+                'change': self._safe_float(row.get('change')),
+                'turnover_rate': self._safe_float(row.get('turnover_rate')),
                 'fetch_time': fetch_time,
                 'source': 'eastmoney_spot'
             }
@@ -151,141 +272,91 @@ class DataFetcher:
             df_new = pd.DataFrame([new_data])
             df_new.set_index('date', inplace=True)
 
-            # 4. [核心逻辑] 读取本地 CSV 并拼接
+            # 4. 拼接到本地 CSV
             file_path = os.path.join(self.DATA_DIR, f"{fund_code}.csv")
             
             if os.path.exists(file_path):
                 try:
-                    # 读取旧数据
                     df_old = pd.read_csv(file_path, index_col='date', parse_dates=['date'])
                     
-                    # 检查今天的数据是否已存在
+                    # 更新或追加
                     if today_date in df_old.index:
-                        # 如果存在，则更新这一行（覆盖）
                         df_old.update(df_new)
                         df_final = df_old
                     else:
-                        # 如果不存在，追加到末尾
                         df_final = pd.concat([df_old, df_new])
                     
-                    # 确保按日期排序
+                    # 去重排序
+                    df_final = df_final[~df_final.index.duplicated(keep='last')]
                     df_final.sort_index(inplace=True)
-                    return self._standardize_dataframe(df_final, "东财"), "东财"
+                    
                 except Exception as e:
-                    logger.error(f"⚠️ 读取本地文件 {fund_code} 失败: {e}，将仅返回当日数据")
-                    return self._standardize_dataframe(df_new, "东财"), "东财"
+                    logger.warning(f"⚠️ 读取历史数据失败，使用新数据: {e}")
+                    df_final = df_new
             else:
-                # 如果没有本地文件（第一次运行），则只返回这一行数据
-                # 注意：这意味着你的 CSV 里只有这一天的数据
-                return self._standardize_dataframe(df_new, "东财"), "东财"
+                df_final = df_new
 
-        except Exception as e:
-            logger.error(f"❌ [东财Spot] 解析数据异常: {e}")
-            return None, None
-
-    # --- 新浪和腾讯的逻辑保持原样，作为备用兜底 ---
-    @retry(retries=2, delay=15)
-    def _fetch_sina(self, fund_code, fetch_time):
-        logger.info(f"🌐 [新浪] 获取 {fund_code}...")
-        try:
-            df = ak.fund_etf_hist_sina(symbol=fund_code)
-            if df is not None and not df.empty:
-                # 简单处理新浪数据格式
-                if 'date' in df.columns: 
-                    df['date'] = pd.to_datetime(df['date'])
-                    df.set_index('date', inplace=True)
-                df['fetch_time'] = fetch_time
-                return self._standardize_dataframe(df, "新浪"), "新浪"
-        except Exception as e:
-            logger.error(f"新浪失败: {e}")
-        return None, None
-
-    @retry(retries=2, delay=15)
-    def _fetch_tencent(self, fund_code, fetch_time):
-        logger.info(f"🌐 [腾讯] 获取 {fund_code}...")
-        try:
-            prefix = 'sh' if fund_code.startswith('5') else ('sz' if fund_code.startswith('1') else '')
-            df = ak.stock_zh_a_hist_tx(symbol=f"{prefix}{fund_code}", start_date="20250101", adjust="qfq")
-            if df is not None and not df.empty:
-                df.rename(columns={'日期':'date', '开盘':'open', '收盘':'close', '最高':'high', '最低':'low', '成交量':'volume'}, inplace=True)
-                df['date'] = pd.to_datetime(df['date'])
-                df.set_index('date', inplace=True)
-                df['fetch_time'] = fetch_time
-                return self._standardize_dataframe(df, "腾讯"), "腾讯"
-        except Exception as e:
-            logger.error(f"腾讯失败: {e}")
-        return None, None
-
-    def _fetch_from_network(self, fund_code):
-        """主获取逻辑"""
-        fetch_time = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
-
-        # 1. 优先尝试东财 (现在是极速 Spot 模式)
-        # 不需要 sleep 了，因为是读内存
-        df, source = self._fetch_eastmoney(fund_code, fetch_time)
-        if df is not None:
-            return df, source
-
-        # 2. 如果 Spot 里没有（比如停牌），尝试新浪（获取历史）
-        time.sleep(random.uniform(2, 5))
-        df, source = self._fetch_sina(fund_code, fetch_time)
-        if df is not None:
-            return df, source
-
-        # 3. 最后尝试腾讯
-        time.sleep(random.uniform(2, 5))
-        df, source = self._fetch_tencent(fund_code, fetch_time)
-        if df is not None:
-            return df, source
+            # 标准化并保存
+            final_df = self._standardize_dataframe(df_final, "东财")
+            final_df.to_csv(file_path)
             
-        return None, None
-
-    def update_cache(self, fund_code):
-        """更新接口，保持写入逻辑不变"""
-        df, source = self._fetch_from_network(fund_code)
-        
-        if df is not None and not df.empty:
-            file_path = os.path.join(self.DATA_DIR, f"{fund_code}.csv")
-            # 无论来源是哪，都直接覆盖写入（因为 _fetch_eastmoney 已经做好了拼接）
-            df.to_csv(file_path)
-            logger.info(f"💾 [{source}] {fund_code} 数据已更新")
+            logger.info(f"💾 [东财] {fund_code} 更新成功 (收盘价: {new_data['close']:.3f}, 涨跌: {new_data['pct_change']:.2f}%)")
             return True
-        else:
-            logger.error(f"❌ {fund_code} 更新失败")
+
+        except Exception as e:
+            logger.error(f"❌ 处理数据异常 {fund_code}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return False
 
 # ===================== 主程序 =====================
 if __name__ == "__main__":
-    print("🚀 [DataFetcher] 启动 (Spot 极速模式)...")
+    print("🚀 [DataFetcher] 启动 (curl_cffi 东财专用版 V18.1)...")
     
-    # 读取配置
+    # 加载配置
     try:
         with open('config.yaml', 'r', encoding='utf-8') as f:
             cfg = yaml.safe_load(f)
             funds = cfg.get('funds', [])
-    except:
-        funds = [] # 此时请确保你的config.yaml存在
+    except Exception as e:
+        logger.error(f"读取配置失败: {e}")
+        funds = []
     
     if not funds:
-        print("⚠️ 未找到基金列表")
-        exit()
+        print("⚠️ 未找到 config.yaml 或基金列表为空")
+        exit(1)
 
     fetcher = DataFetcher()
     
-    # [关键步骤] 初始化全市场数据 (只请求1次)
-    fetcher._init_spot_data()
+    # 初始化全市场数据（只请求1次）
+    if not fetcher._init_spot_data():
+        logger.error("❌ 无法获取全市场数据，退出")
+        exit(1)
 
+    # 批量更新
     success_count = 0
+    total = len(funds)
+    
     for idx, fund in enumerate(funds):
-        code = str(fund.get('code')) # 确保是字符串
-        name = fund.get('name')
+        code = str(fund.get('code', '')).strip()
+        name = fund.get('name', 'Unknown')
         
-        # 这里的 update_cache 速度会非常快
+        if not code or len(code) < 6:
+            logger.warning(f"⚠️ 跳过无效代码: {fund}")
+            continue
+            
+        logger.info(f"🔄 [{idx+1}/{total}] {name} ({code})")
+        
         if fetcher.update_cache(code):
             success_count += 1
             
-        # 极速模式下，不需要 sleep 很久，微小的间隔即可
-        if idx % 10 == 0: 
-            print(f"进度: {idx+1}/{len(funds)}...")
+        # 每 10 个输出进度
+        if (idx + 1) % 10 == 0 or idx == total - 1:
+            logger.info(f"📊 进度: {idx+1}/{total}, 成功: {success_count}")
             
-    print(f"🏁 完成: {success_count}/{len(funds)}")
+    logger.info(f"🏁 完成: {success_count}/{total}")
+    print(f"🏁 行情更新完成: {success_count}/{total}")
+    
+    # 清理
+    del fetcher
+    gc.collect()
