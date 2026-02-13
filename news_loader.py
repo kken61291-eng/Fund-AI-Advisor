@@ -1,170 +1,245 @@
-import requests
+import akshare as ak
 import json
+import os
 import time
-import random
+import requests
 import pandas as pd
 from datetime import datetime
+import hashlib
 import pytz
+import re
+from bs4 import BeautifulSoup
+
+# --- Selenium 模块 ---
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+    from webdriver_manager.chrome import ChromeDriverManager
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+except ImportError:
+    print("❌ 缺少 Selenium 依赖，请在 requirements.txt 中添加: selenium, webdriver-manager, beautifulsoup4")
+
+# --- 配置 ---
+DATA_DIR = "data_news"
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
+
+def get_beijing_time():
+    return datetime.now(pytz.timezone('Asia/Shanghai'))
+
+def get_today_str():
+    return get_beijing_time().strftime("%Y-%m-%d")
+
+def generate_news_id(item):
+    raw = f"{item.get('time','')}{item.get('title','')}"
+    return hashlib.md5(raw.encode('utf-8')).hexdigest()
+
+def clean_time_str(t_str):
+    if not t_str: return ""
+    try:
+        if len(str(t_str)) == 10: 
+             return datetime.fromtimestamp(int(t_str)).strftime("%Y-%m-%d %H:%M:%S")
+        if len(str(t_str)) > 19:
+            return str(t_str)[:19]
+        return str(t_str)
+    except:
+        return str(t_str)
 
 # ==========================================
-# 实时行情抓取模块 (Anti-Ban & Real-Time)
+# 1. 东财抓取 (双保险模式)
 # ==========================================
-
-class RealTimeDataFetcher:
-    def __init__(self):
-        # 预设随机 User-Agent 池
-        self.ua_list = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        ]
-        self.data_dir = "data_cache"
-        import os
-        if not os.path.exists(self.data_dir):
-            os.makedirs(self.data_dir)
-
-    def get_beijing_time(self):
-        """获取当前北京时间字符串"""
-        return datetime.now(pytz.timezone('Asia/Shanghai')).strftime("%Y-%m-%d %H:%M:%S")
-
-    def get_headers(self, referer="https://quote.eastmoney.com/"):
-        """生成随机请求头，强制关闭长连接以防被踢"""
-        return {
-            "User-Agent": random.choice(self.ua_list),
-            "Accept": "*/*",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-            "Referer": referer,
-            "Connection": "close"  # 核心修复：防止 RemoteDisconnected 错误
+def fetch_eastmoney_direct():
+    items = []
+    try:
+        print("   - [Plan B] 启动东财直连模式 (Direct API)...")
+        url = "https://newsapi.eastmoney.com/kuaixun/v1/getlist_102_ajaxResult_50_1_.html"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://kuaixun.eastmoney.com/"
         }
-
-    def _format_symbol(self, symbol):
-        """内部工具：识别市场前缀 (东财格式)"""
-        # 上海证券交易所 (6开头股票, 5开头ETF)
-        if symbol.startswith("6") or symbol.startswith("5"):
-            return f"1.{symbol}"
-        # 深圳证券交易所 (0、3开头股票, 1开头ETF)
-        else:
-            return f"0.{symbol}"
-
-    def fetch_from_eastmoney(self, symbol):
-        """
-        方案一：东方财富 Push2 实时接口
-        说明：这是目前最实时的公开接口，数据同步频率极高。
-        """
-        secid = self._format_symbol(symbol)
-        # f43:最新价, f44:最高, f45:最低, f46:开盘, f47:成交量, f48:成交额, f170:涨跌幅
-        url = "https://push2.eastmoney.com/api/qt/stock/get"
-        params = {
-            "ut": "fa5fd1943c7b386f172d6893dbfba10b",
-            "fltt": "2",
-            "invt": "2",
-            "fields": "f43,f44,f45,f46,f47,f48,f169,f170,f60,f107",
-            "secid": secid,
-            "_": int(time.time() * 1000)
-        }
-
-        try:
-            resp = requests.get(url, params=params, headers=self.get_headers(), timeout=5)
-            if resp.status_code == 200:
-                data = resp.json().get("data")
-                if data and data['f43'] != '-':
-                    return {
-                        "symbol": symbol,
-                        "name": data.get("f58", "N/A"),
-                        "price": data["f43"],
-                        "open": data["f46"],
-                        "high": data["f44"],
-                        "low": data["f45"],
-                        "change_percent": data["f170"],
-                        "volume": data["f47"],
-                        "amount": data["f48"],
-                        "time": self.get_beijing_time(),
-                        "source": "EastMoney"
-                    }
-        except Exception as e:
-            print(f"   ❌ 东财接口报错: {e}")
-        return None
-
-    def fetch_from_sina(self, symbol):
-        """
-        方案二：新浪财经实时接口 (备选)
-        说明：新浪接口非常稳定，且支持批量获取，对高频请求友好。
-        """
-        market = "sh" if (symbol.startswith("6") or symbol.startswith("5")) else "sz"
-        url = f"http://hq.sinajs.cn/list={market}{symbol}"
-        headers = self.get_headers(referer="https://finance.sina.com.cn/")
+        resp = requests.get(url, headers=headers, timeout=15)
         
-        try:
-            resp = requests.get(url, headers=headers, timeout=5)
-            # 新浪返回的是 GBK 编码
-            text = resp.content.decode('GBK')
-            if '="' in text:
-                data_str = text.split('="')[1].split(',')
-                if len(data_str) > 30:
-                    return {
-                        "symbol": symbol,
-                        "price": float(data_str[3]),
-                        "open": float(data_str[1]),
-                        "high": float(content[4]) if 'content' in locals() else float(data_str[4]),
-                        "low": float(data_str[5]),
-                        "time": f"{data_str[30]} {data_str[31]}",
-                        "source": "Sina"
-                    }
-        except Exception as e:
-            print(f"   ❌ 新浪接口报错: {e}")
-        return None
+        if resp.status_code == 200:
+            text = resp.text
+            try:
+                start_idx = text.find('{')
+                end_idx = text.rfind('}')
+                if start_idx != -1 and end_idx != -1:
+                    json_str = text[start_idx : end_idx + 1]
+                    data = json.loads(json_str)
+                    news_list = data.get('LivesList', [])
+                    for news in news_list:
+                        title = news.get('title', '').strip()
+                        digest = news.get('digest', '').strip()
+                        show_time = news.get('showtime', '') 
+                        content = digest if len(digest) > len(title) else title
+                        if not title: continue
+                        items.append({
+                            "time": show_time, "title": title, "content": content, "source": "EastMoney"
+                        })
+                    print(f"   - [Plan B] 成功解析并获取 {len(items)} 条数据")
+            except Exception as parse_e:
+                print(f"   - [Plan B] JSON 解析异常: {parse_e}")
+    except Exception as e:
+        print(f"   ❌ [Plan B] 东财直连失败: {e}")
+    return items
 
-    def get_realtime_quote(self, symbol):
-        """
-        统一调用入口：东财优先，新浪备份
-        """
-        # 1. 尝试东财
-        result = self.fetch_from_eastmoney(symbol)
-        if result:
-            return result
-        
-        # 2. 东财失败，尝试新浪
-        print(f"   ⚠️ {symbol} 东财源失效，正在切换新浪实时源...")
-        time.sleep(0.5) # 短暂休眠规避
-        result = self.fetch_from_sina(symbol)
-        if result:
-            return result
-            
-        return None
+def fetch_eastmoney():
+    items = []
+    try:
+        print("   - [Plan A] 正在抓取: 东方财富 (Akshare)...")
+        df_em = ak.stock_telegraph_em()
+        if df_em is not None and not df_em.empty:
+            for _, row in df_em.iterrows():
+                title = str(row.get('title', '')).strip()
+                content = str(row.get('content', '')).strip()
+                public_time = clean_time_str(row.get('public_time', ''))
+                if not title or len(title) < 2: continue
+                items.append({
+                    "time": public_time, "title": title, "content": content, "source": "EastMoney"
+                })
+            print(f"   - [Plan A] 成功获取 {len(items)} 条数据")
+            return items
+    except Exception as e:
+        print(f"   ⚠️ Akshare 调用出错，切换至 Plan B...")
+    return fetch_eastmoney_direct()
 
 # ==========================================
-# 主程序示例
+# 2. 财联社抓取 (Selenium 增强版)
 # ==========================================
-
-def main():
-    fetcher = RealTimeDataFetcher()
-    
-    # 你日志中关注的代码列表
-    target_symbols = ["510050", "510300", "510500", "159915"]
-    
-    print(f"🚀 [DataFetcher] 启动实时行情监测 - {fetcher.get_beijing_time()}")
-    print("-" * 50)
-    
-    results = []
-    for sym in target_symbols:
-        # 增加随机延迟，防止频率过快触发防火墙
-        time.sleep(random.uniform(0.5, 1.5))
+def fetch_cls_selenium():
+    items = []
+    driver = None
+    try:
+        print("   - [Browser] 正在启动 Chrome 抓取: 财联社 (CLS)...")
         
-        quote = fetcher.get_realtime_quote(sym)
-        if quote:
-            print(f"✅ [{quote['source']}] {sym} | 价格: {quote['price']} | 幅度: {quote.get('change_percent', 'N/A')}%")
-            results.append(quote)
-        else:
-            print(f"❌ {sym} 所有实时源抓取失败")
+        chrome_options = Options()
+        # 🟢 必须开启无头模式，否则服务器无法运行
+        chrome_options.add_argument("--headless") 
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        # 伪装 User-Agent
+        chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36")
 
-    # 保存最新结果
-    if results:
-        df = pd.DataFrame(results)
-        save_path = f"data_cache/realtime_quotes.csv"
-        df.to_csv(save_path, index=False, encoding='utf-8-sig')
-        print("-" * 50)
-        print(f"💾 数据已同步至: {save_path}")
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver.set_page_load_timeout(60)
+        
+        url = "https://www.cls.cn/telegraph"
+        driver.get(url)
+        
+        # 等待加载
+        try:
+            WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.CLASS_NAME, "telegraph-list"))
+            )
+        except:
+            print("   ⚠️ 等待网页加载超时，尝试直接解析...")
+
+        # 模拟滚动加载更多
+        driver.execute_script("window.scrollTo(0, 1000);")
+        time.sleep(2) 
+
+        html = driver.page_source
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        nodes = soup.find_all("div", class_="telegraph-list-item")
+        if not nodes:
+            nodes = soup.select("div.telegraph-content-box")
+
+        print(f"   - 捕获到 {len(nodes)} 个网页节点")
+
+        current_date_prefix = get_beijing_time().strftime("%Y-%m-%d")
+
+        for node in nodes:
+            try:
+                time_span = node.find("span", class_="telegraph-time")
+                time_str = time_span.get_text().strip() if time_span else ""
+                
+                # 时间补全逻辑
+                if len(time_str) < 10 and ":" in time_str:
+                    if len(time_str) <= 5:
+                        full_time = f"{current_date_prefix} {time_str}:00"
+                    else:
+                        full_time = f"{current_date_prefix} {time_str}"
+                else:
+                    full_time = time_str
+
+                content_div = node.find("div", class_="telegraph-content")
+                if not content_div: content_div = node.find("div", class_="telegraph-detail")
+                
+                content_text = content_div.get_text().strip() if content_div else ""
+                
+                if content_text:
+                    title = content_text[:40] + "..." if len(content_text) > 40 else content_text
+                    
+                    items.append({
+                        "time": full_time, "title": title, "content": content_text, "source": "CLS"
+                    })
+            except: continue
+
+    except Exception as e:
+        print(f"   ❌ 财联社(Selenium)抓取失败: {e}")
+        print("   (提示: 请确保服务器已安装 Chrome 和 ChromeDriver)")
+    finally:
+        if driver:
+            try: driver.quit()
+            except: pass
+    
+    return items
+
+# ==========================================
+# 主程序
+# ==========================================
+def fetch_and_save_news():
+    today_date = get_today_str()
+    print(f"📡 [NewsLoader] 启动混合抓取 (Smart Mode) - {today_date}...")
+    
+    all_news_items = []
+
+    # 1. 东财
+    em_items = fetch_eastmoney()
+    all_news_items.extend(em_items)
+
+    print(f"⏳ 正在启动浏览器抓取财联社...")
+    # 2. 财联社 (Selenium)
+    cls_items = fetch_cls_selenium()
+    all_news_items.extend(cls_items)
+
+    # 3. 入库
+    if not all_news_items:
+        print("⚠️ 未获取到任何新闻数据")
+        return
+
+    today_file = os.path.join(DATA_DIR, f"news_{today_date}.jsonl")
+    existing_ids = set()
+    
+    if os.path.exists(today_file):
+        with open(today_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    saved_item = json.loads(line)
+                    if 'id' in saved_item:
+                        existing_ids.add(saved_item['id'])
+                except: pass
+
+    new_count = 0
+    all_news_items.sort(key=lambda x: x['time'], reverse=True)
+
+    with open(today_file, 'a', encoding='utf-8') as f:
+        for item in all_news_items:
+            item_id = generate_news_id(item)
+            item['id'] = item_id
+            if item_id not in existing_ids:
+                f.write(json.dumps(item, ensure_ascii=False) + "\n")
+                existing_ids.add(item_id)
+                new_count += 1
+    
+    print(f"✅ 入库完成: 新增 {new_count} 条 (EM:{len(em_items)} | CLS:{len(cls_items)})")
 
 if __name__ == "__main__":
-    main()
+    fetch_and_save_news()
