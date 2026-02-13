@@ -32,9 +32,9 @@ def _md_to_html(text):
     
     return text
 
-def render_html_report_v20(news_list, results, cio_review, advisor_review):
+def render_html_report_v19(news_list, results, cio_review, advisor_review):
     """
-    V20.0 UI 渲染器 - V19.3 结构 + V15.20 深色金融配色 + Logo 嵌入
+    V19.0 UI 渲染器 - V19.3 结构 + V15.20 深色金融配色 + Logo 嵌入
     """
     
     # --- V15.20 配色方案 ---
