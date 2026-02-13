@@ -25,10 +25,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 🟢 核心修改：优先从系统环境变量获取 Key (适配 GitHub Secrets)
+# 🟢 优先从系统环境变量获取 Key
 SCRAPERAPI_KEY = os.environ.get("SCRAPERAPI_KEY", "")
 
-# 如果环境变量没拿到，尝试读取本地 settings.py (方便本地调试)
+# 尝试读取本地 settings.py
 if not SCRAPERAPI_KEY:
     try:
         import settings
@@ -36,13 +36,12 @@ if not SCRAPERAPI_KEY:
     except ImportError:
         pass
 
-# 如果 ScraperAPI 额度耗尽(403错误)或失败，是否允许自动降级为本机直连？
+# 允许自动降级
 ALLOW_DIRECT_FALLBACK = True 
 
 if not SCRAPERAPI_KEY:
     logger.warning("⚠️ 未检测到 SCRAPERAPI_KEY (Secrets 或 settings)，将仅使用直连模式")
 else:
-    # 隐藏 Key 的中间部分，只打印首尾，用于日志确认
     masked_key = f"{SCRAPERAPI_KEY[:4]}****{SCRAPERAPI_KEY[-4:]}" if len(SCRAPERAPI_KEY) > 8 else "****"
     logger.info(f"🔑 已加载 ScraperAPI Key: {masked_key}")
 
@@ -72,7 +71,6 @@ class DataFetcher:
     def _create_session(self, use_proxy: bool = True):
         self._close_session()
         try:
-            # 只有当 Key 存在且 use_proxy 为 True 时才使用代理
             if use_proxy and SCRAPERAPI_KEY:
                 proxy_url = self._get_scraperapi_proxy()
                 self.session = cffi_requests.Session(
@@ -100,7 +98,6 @@ class DataFetcher:
             gc.collect()
 
     def _safe_request(self, url: str, params: dict, headers: dict, max_retries: int = 3) -> Optional[dict]:
-        # 如果 Key 存在，默认优先尝试代理
         use_proxy_default = True if SCRAPERAPI_KEY else False
         
         if self.session is None:
@@ -111,7 +108,6 @@ class DataFetcher:
                 if not self.session: raise Exception("Session Lost")
                 r = self.session.get(url, params=params, headers=headers)
                 
-                # 403 处理：Key 无效或额度耗尽
                 if r.status_code == 403:
                     logger.warning("⚠️ ScraperAPI 返回 403 (额度耗尽/Key错误)")
                     if ALLOW_DIRECT_FALLBACK:
@@ -129,7 +125,6 @@ class DataFetcher:
                 return r.json()
             except (ProxyError, Timeout, RequestException) as e:
                 time.sleep(2) 
-                # 最后一次尝试且允许降级，则切直连
                 if attempt == max_retries - 1 and ALLOW_DIRECT_FALLBACK:
                      self._create_session(use_proxy=False)
                      try:
@@ -149,7 +144,6 @@ class DataFetcher:
         logger.info("📡 正在更新全市场 ETF 数据...")
         
         while page <= 200 and consecutive_errors < 3:
-            # 使用全口径参数
             fs_param = "b:MK0021,b:MK0022,b:MK0023,b:MK0024,m:1 t:2,m:1 t:23,m:0 t:6,m:0 t:80"
             
             params = {
@@ -277,10 +271,6 @@ class DataFetcher:
             return False
 
     def get_fund_history(self, fund_code: str) -> pd.DataFrame:
-        """
-        读取本地缓存的基金历史数据
-        供 main.py 的 IC 分析使用
-        """
         code = str(fund_code).strip().lower().replace('sh', '').replace('sz', '')
         path = os.path.join(self.DATA_DIR, f"{code}.csv")
         
@@ -305,6 +295,42 @@ class DataFetcher:
             logger.error(f"❌ 读取历史数据失败 {fund_code}: {e}")
             return pd.DataFrame()
 
+    # 🟢 [新增] 宏观资金流获取接口 (通过 API)
+    def get_market_net_flow(self) -> float:
+        """获取全市场(上证+深证)主力资金净流入 (单位: 亿)"""
+        try:
+            url = "https://push2.eastmoney.com/api/qt/ulist.np/get"
+            params = {
+                "fltt": "2",
+                "secids": "1.000001,0.399001", # 上证指数, 深证成指
+                "fields": "f62", # 主力净流入
+                "_": str(int(time.time() * 1000))
+            }
+            
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            }
+            
+            # 复用 _safe_request，享受 ScraperAPI/直连切换的稳定性
+            data = self._safe_request(url, params, headers)
+            
+            if not data or 'diff' not in data.get('data', {}):
+                logger.warning("⚠️ 宏观资金流数据为空")
+                return 0.0
+            
+            total_flow = 0.0
+            for item in data['data']['diff']:
+                # f62 可能为字符串或数字
+                flow = float(item.get('f62', 0))
+                total_flow += flow
+            
+            # 转换为亿元，保留2位小数
+            return round(total_flow / 100000000, 2)
+            
+        except Exception as e:
+            logger.error(f"❌ 获取宏观资金流失败: {e}")
+            return 0.0
+
     def run(self, funds: List[dict]):
         self.total_funds = len(funds)
         self.success_count = 0
@@ -327,30 +353,11 @@ class DataFetcher:
                  logger.info(f"📊 进度: {i}/{self.total_funds}, 成功: {self.success_count}")
         return self.success_count
 
-# ===================== 主入口 =====================
 if __name__ == "__main__":
     print("=" * 60)
-    print("🚀 DataFetcher V23.6 (Env Vars Support)")
+    print("🚀 DataFetcher V23.7 (Macro Flow API)")
     print("=" * 60)
-    
-    funds = []
-    if os.path.exists('config.yaml'):
-        with open('config.yaml', 'r', encoding='utf-8') as f:
-            cfg = yaml.safe_load(f)
-            funds = cfg.get('funds', [])
-    else:
-        logger.warning("⚠️ 使用测试数据 (config.yaml 未找到)")
-        funds = [{'code': '510300', 'name': '沪深300ETF'}, {'code': '510050', 'name': '上证50ETF'}]
-    
-    if not funds:
-        print("❌ 基金列表为空")
-        sys.exit(1)
-    
-    fetcher = DataFetcher()
-    success = fetcher.run(funds)
-    
-    print(f"\n{'=' * 60}")
-    print(f"🏁 完成: {success}/{len(funds)}")
-    print(f"{'=' * 60}")
-    
-    sys.exit(0 if success > 0 else 1)
+    # 测试宏观资金流
+    f = DataFetcher()
+    flow = f.get_market_net_flow()
+    print(f"💰 当前全市场主力净流入: {flow} 亿")
