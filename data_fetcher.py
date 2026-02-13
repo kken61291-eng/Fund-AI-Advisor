@@ -124,13 +124,13 @@ class DataFetcher:
         # 1. 东财 (EastMoney) - 优先数据源，字段最全
         # [优化] 增加随机延时，减少被 Ban 概率
         try:
-            time.sleep(random.uniform(3.0, 6.0)) 
+            time.sleep(random.uniform(5.0, 9.0)) 
             logger.info(f"Trying EastMoney for {fund_code}...")
             
             df = ak.fund_etf_hist_em(
                 symbol=fund_code, 
                 period="daily", 
-                start_date="20200101", 
+                start_date="20230101", 
                 end_date="20500101", 
                 adjust="qfq"
             )
@@ -273,10 +273,10 @@ class DataFetcher:
             df.to_csv(file_path)
             logger.info(f"💾 [{source}] {fund_code} 数据已保存至 {file_path}")
             
-            # [关键优化] 如果是东财数据，强制等待 90 秒 (应对最近的反爬升级)
+            # [关键优化] 如果是东财数据，强制等待 40 秒 (应对最近的反爬升级)
             if source == "东财":
-                logger.info("⏳ [东财] 触发频率保护机制，强制等待 65 秒...")
-                time.sleep(90)
+                logger.info("⏳ [东财] 触发频率保护机制，强制等待 40 秒...")
+                time.sleep(40)
             
             return True
         else:
