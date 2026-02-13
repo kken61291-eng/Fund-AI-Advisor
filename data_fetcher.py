@@ -338,7 +338,7 @@ if __name__ == "__main__":
             if fetcher.update_cache(code):
                 success_count += 1
             # 基础间隔，防止多源切换时也过快
-            time.sleep(random.uniform(2.0, 4.0))
+            time.sleep(random.uniform(5.0, 9.0))
         except Exception as e:
             print(f"❌ 更新异常 {name}: {e}")
             
