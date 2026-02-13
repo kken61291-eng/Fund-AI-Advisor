@@ -171,7 +171,7 @@ def render_html_report_v19(news_list, results, cio_review, advisor_review):
                         <img src="{logo_src}" alt="Logo">
                     </div>
                     <h1>🦅 鹊知风全量化日报</h1>
-                    <div class="date-line">{current_date} | V15.20 洞察微澜，御风而行</div>
+                    <div class="date-line">{current_date} | V20.20 洞察微澜，御风而行</div>
                     <div class="tagline">MAGPIE SENSES THE WIND</div>
                 </div>
     """
