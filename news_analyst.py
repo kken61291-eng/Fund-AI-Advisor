@@ -14,7 +14,7 @@ class NewsAnalyst:
         self.api_key = os.getenv("LLM_API_KEY")
         self.base_url = os.getenv("LLM_BASE_URL")
         # 战术执行 (快思考): V3.2 - 负责 CGO/CRO/CIO 实时信号
-        self.model_tactical = "Pro/deepseek-ai/DeepSeek-V3.2"       
+        self.model_tactical = "Pro/deepseek-ai/DeepSeek-R1"       
         # 战略推理 (慢思考): R1 - 负责 宏观复盘/逻辑审计
         self.model_strategic = "Pro/deepseek-ai/DeepSeek-R1"    
 
