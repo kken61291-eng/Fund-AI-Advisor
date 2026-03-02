@@ -139,7 +139,7 @@
     "name": "中证红利ETF",
     "shares": 626.3701847792045,
     "cost": 3.193,
-    "held_days": 3,
+    "held_days": 4,
     "history": [
       {
         "date": "2026-02-13",
@@ -343,7 +343,7 @@
     "name": "有色金属ETF",
     "shares": 2598.4074674806793,
     "cost": 2.3091,
-    "held_days": 4,
+    "held_days": 5,
     "history": [
       {
         "date": "2026-02-13",
@@ -955,7 +955,7 @@
     "name": "中证500ETF",
     "shares": 471.6376861780384,
     "cost": 8.4811,
-    "held_days": 5,
+    "held_days": 6,
     "history": [
       {
         "date": "2026-02-13",
@@ -1363,7 +1363,7 @@
     "name": "科创50ETF",
     "shares": 1282.051282051282,
     "cost": 1.56,
-    "held_days": 2,
+    "held_days": 3,
     "history": [
       {
         "date": "2026-02-13",
@@ -1635,7 +1635,7 @@
     "name": "黄金ETF",
     "shares": 553.8560964407505,
     "cost": 10.8332,
-    "held_days": 5,
+    "held_days": 6,
     "history": [
       {
         "date": "2026-02-13",
