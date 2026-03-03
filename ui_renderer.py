@@ -16,7 +16,7 @@ def _translate_term(term):
     return mapping.get(str(term).upper(), str(term))
 
 def _md_to_html(text):
-    """深度 Markdown 清洗器 (防止 H5 代码残留，适配赛博风格)"""
+    """深度 Markdown 清洗器"""
     if not text: return ""
     text = str(text)
     text = text.replace("```html", "").replace("```", "")
@@ -31,7 +31,6 @@ def _parse_cio_json_to_html(text):
     """将 CIO 的 JSON 代码解析为精美的中文 HTML 阅读格式"""
     if not text: return ""
     
-    # 尝试提取 JSON 内容
     json_str = text
     match = re.search(r'\{.*\}', text, flags=re.DOTALL)
     if match:
@@ -41,7 +40,6 @@ def _parse_cio_json_to_html(text):
         data = json.loads(json_str)
         html = '<div style="font-family: -apple-system, sans-serif;">'
         
-        # 1. 战略研判 (CIO Strategic Review)
         cio_rev = data.get("cio_strategic_review", {})
         if cio_rev:
             html += f"""
@@ -56,7 +54,6 @@ def _parse_cio_json_to_html(text):
             </div>
             """
             
-        # 2. 防御性配置 (Defensive Allocation)
         defense = data.get("defensive_allocation", {})
         if defense:
             html += f"""
@@ -70,7 +67,6 @@ def _parse_cio_json_to_html(text):
             </div>
             """
             
-        # 3. 监控清单与前提条件 (Assumption Monitoring)
         assump = data.get("assumption_monitoring", {})
         if assump:
             premises = assump.get("premises", [])
@@ -88,7 +84,6 @@ def _parse_cio_json_to_html(text):
             </div>
             """
             
-        # 4. 否决清单 (Veto List) - 选填
         vetoes = data.get("strategic_veto_list", [])
         if vetoes:
             html += '<div style="font-size: 14px; font-weight: bold; color: #ff2a6d; margin-bottom: 8px; margin-top: 15px;">❌ 被风控系统一票否决的提案</div>'
@@ -104,10 +99,10 @@ def _parse_cio_json_to_html(text):
         return html
     except Exception as e:
         logger.warning(f"CIO JSON 解析失败，回退为普通文本: {e}")
-        return _md_to_html(text) # 解析失败则直接按 Markdown 渲染文本
+        return _md_to_html(text) 
 
 def render_html_report_v19(news_list, results, cio_review, advisor_review):
-    """V20.0 UI 渲染器 - 全中文赛博美学版 (Variance: Zero)"""
+    """V20.0 UI 渲染器 - 全中文赛博美学版 (鹊知风)"""
     
     COLOR_CYBER = "#00d2ff"     
     COLOR_CYBER_SEC = "#00f0ff" 
@@ -134,7 +129,7 @@ def render_html_report_v19(news_list, results, cio_review, advisor_review):
         .header::before {{ content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; 
                            background: linear-gradient(90deg, transparent, {COLOR_CYBER}, transparent); }}
         
-        .header h1 {{ margin: 0; font-size: 24px; font-weight: 700; color: {COLOR_CYBER}; letter-spacing: 2px; text-transform: uppercase; }}
+        .header h1 {{ margin: 0; font-size: 24px; font-weight: 700; color: {COLOR_CYBER}; letter-spacing: 2px; }}
         .date-line {{ font-size: 12px; color: {COLOR_TEXT_SUB}; margin-top: 10px; font-family: monospace; }}
         
         .section-box {{ padding: 25px 20px; border-bottom: 1px solid {COLOR_BORDER}; }}
@@ -209,7 +204,7 @@ def render_html_report_v19(news_list, results, cio_review, advisor_review):
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Variance: Zero - 量化分析报告</title>
+        <title>鹊知风 - 量化分析报告</title>
         {css}
     </head>
     <body>
@@ -217,11 +212,11 @@ def render_html_report_v19(news_list, results, cio_review, advisor_review):
             <div class="container">
                 <div class="header">
                     <div class="logo-area">
-                        <img src="{logo_src}" alt="Variance: Zero Logo">
+                        <img src="{logo_src}" alt="Logo">
                     </div>
-                    <h1>💠 VARIANCE: ZERO</h1>
-                    <div class="date-line">系统时间: {current_date} | 核心架构: v19.6.5-Cyber</div>
-                    <div class="tagline">认知对抗·多轨决策模型</div>
+                    <h1>🦅 鹊知风全量化日报</h1>
+                    <div class="date-line">系统时间: {current_date} | V20.20 洞察微澜，御风而行</div>
+                    <div class="tagline">MAGPIE SENSES THE WIND</div>
                 </div>
     """
     
@@ -365,7 +360,7 @@ def render_html_report_v19(news_list, results, cio_review, advisor_review):
                 <div class="footer">
                     系统内核: FUND-AI-ADVISOR <br>
                     运行节点: KKEN61291-ENG <br>
-                    © 2026 VARIANCE: ZERO. 零方差控制委员会.
+                    © 2026 鹊知风. MAGPIE SENSES THE WIND.
                 </div>
             </div>
         </div>
