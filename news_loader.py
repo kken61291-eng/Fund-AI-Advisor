@@ -108,16 +108,48 @@ def fetch_eastmoney():
     return fetch_eastmoney_direct()
 
 # ==========================================
-# 2. 财联社抓取 (Selenium 增强版)
+# 2. 财联社抓取 (API + Selenium 双保险增强版)
 # ==========================================
+def fetch_cls_api():
+    """ 🟢 新增：尝试通过公开 API 直接获取财联社电报，速度极快 """
+    items = []
+    try:
+        print("   - [Plan A] 正在尝试通过 API 抓取: 财联社 (CLS)...")
+        url = "https://www.cls.cn/nodeapi/telegraphList?rn=50"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        }
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            if "data" in data and "roll_data" in data["data"]:
+                for news in data["data"]["roll_data"]:
+                    title = news.get("title", "")
+                    content = news.get("content", "")
+                    ctime = news.get("ctime")
+                    
+                    if not title and not content: continue
+                    final_title = title if title else (content[:40] + "..." if len(content) > 40 else content)
+                    final_content = content if content else title
+                    full_time = datetime.fromtimestamp(ctime).strftime("%Y-%m-%d %H:%M:%S") if ctime else ""
+                    
+                    items.append({
+                        "time": full_time, "title": final_title, "content": final_content, "source": "CLS"
+                    })
+                print(f"   - [Plan A] 成功通过 API 获取 {len(items)} 条财联社数据")
+                return items
+    except Exception as e:
+        print(f"   ⚠️ API 抓取异常或拦截: {e}，将自动切换至浏览器模式...")
+    return items
+
 def fetch_cls_selenium():
     items = []
     driver = None
     try:
-        print("   - [Browser] 正在启动 Chrome 抓取: 财联社 (CLS)...")
+        print("   - [Plan B] 正在启动 Chrome 抓取: 财联社 (CLS)...")
         
         chrome_options = Options()
-        # 🟢 必须开启无头模式，否则服务器无法运行
+        # 必须开启无头模式，否则服务器无法运行
         chrome_options.add_argument("--headless") 
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
@@ -140,9 +172,11 @@ def fetch_cls_selenium():
         except:
             print("   ⚠️ 等待网页加载超时，尝试直接解析...")
 
-        # 模拟滚动加载更多
-        driver.execute_script("window.scrollTo(0, 1000);")
-        time.sleep(2) 
+        # 🟢 核心优化：多次向下滚动以加载大量历史数据
+        print("   - 正在自动向下滚动网页以加载更多历史电报...")
+        for _ in range(4):
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(1.5) 
 
         html = driver.page_source
         soup = BeautifulSoup(html, 'html.parser')
@@ -151,7 +185,7 @@ def fetch_cls_selenium():
         if not nodes:
             nodes = soup.select("div.telegraph-content-box")
 
-        print(f"   - 捕获到 {len(nodes)} 个网页节点")
+        print(f"   - [Plan B] 捕获到 {len(nodes)} 个网页节点")
 
         current_date_prefix = get_beijing_time().strftime("%Y-%m-%d")
 
@@ -192,6 +226,22 @@ def fetch_cls_selenium():
     
     return items
 
+def fetch_cls():
+    """ 综合控制台，混合调度财联社数据获取 """
+    items = fetch_cls_api()
+    # 🟢 优化：如果 API 没有抓到数据，或者抓得太少，触发 Selenium 增强机制补充
+    if not items or len(items) < 15:
+        print("   ⚠️ API 获取数据偏少，启动 Selenium 进行深度抓取补充...")
+        sel_items = fetch_cls_selenium()
+        
+        # 简单依据标题去重，将 Selenium 的数据合并进来
+        seen_titles = set([i['title'] for i in items])
+        for si in sel_items:
+            if si['title'] not in seen_titles:
+                items.append(si)
+                seen_titles.add(si['title'])
+    return items
+
 # ==========================================
 # 主程序
 # ==========================================
@@ -205,10 +255,43 @@ def fetch_and_save_news():
     em_items = fetch_eastmoney()
     all_news_items.extend(em_items)
 
-    print(f"⏳ 正在启动浏览器抓取财联社...")
-    # 2. 财联社 (Selenium)
-    cls_items = fetch_cls_selenium()
-    all_news_items.extend(cls_items)
+    # 🟢 核心优化：构建东财新闻纯净文本池（去除所有标点符号），用于智能比对
+    em_clean_texts = set()
+    for item in em_items:
+        # 将标题和正文合并，利用正则只保留中文、英文和数字
+        clean_text = re.sub(r'[^\w\u4e00-\u9fa5]', '', item.get('content', '') + item.get('title', ''))
+        if len(clean_text) >= 10: 
+            em_clean_texts.add(clean_text)
+
+    print(f"⏳ 正在启动财联社抓取任务...")
+    
+    # 2. 财联社
+    cls_items_raw = fetch_cls()
+
+    # 🟢 核心优化：拦截已经存在于东财中的财联社重复新闻
+    cls_items_filtered = []
+    filtered_count = 0
+    
+    for item in cls_items_raw:
+        cls_clean_text = re.sub(r'[^\w\u4e00-\u9fa5]', '', item.get('content', '') + item.get('title', ''))
+        is_duplicate = False
+        
+        if len(cls_clean_text) >= 10:
+            for em_text in em_clean_texts:
+                # 模糊匹配：如果两段长文本互相包含，即可判定是同一条新闻，触发拦截
+                if cls_clean_text in em_text or em_text in cls_clean_text:
+                    is_duplicate = True
+                    break
+                    
+        if is_duplicate:
+            filtered_count += 1
+        else:
+            cls_items_filtered.append(item)
+
+    if filtered_count > 0:
+        print(f"   🛡️ [去重拦截] 发现 {filtered_count} 条财联社新闻已在东财中播报过，自动拦截过滤。")
+
+    all_news_items.extend(cls_items_filtered)
 
     # 3. 入库
     if not all_news_items:
@@ -239,7 +322,7 @@ def fetch_and_save_news():
                 existing_ids.add(item_id)
                 new_count += 1
     
-    print(f"✅ 入库完成: 新增 {new_count} 条 (EM:{len(em_items)} | CLS:{len(cls_items)})")
+    print(f"✅ 入库完成: 新增 {new_count} 条 (EM:{len(em_items)} | CLS:{len(cls_items_filtered)})")
 
 if __name__ == "__main__":
     fetch_and_save_news()
