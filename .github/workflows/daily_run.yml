@@ -51,6 +51,9 @@ jobs:
         LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
         
+        # [新增] 代理配置，防止获取资金流和补全历史数据时被拦截
+        SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
+        
       run: |
         # 运行主程序
         python main.py
