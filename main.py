@@ -104,11 +104,8 @@ def calculate_position_v13(tech, ai_adj, ai_decision, val_mult, val_desc, base_a
 
 def process_phase1_proposal(fund, fetcher, tracker, val_engine, analyst, market_context):
     """
-    [Phase 1] 战术层提案收集
-    功能：获取数据 -> 技术分析 -> 估值 -> AI IC 辩论
-    返回：Proposal 字典 (包含辩论记录，但不做最终决策)
+    [Phase 1] 战术层提案收集 (适配 v19.6.5 结构)
     """
-    # 随机等待，保护接口
     time.sleep(random.uniform(2.0, 4.0))
     
     fund_name = fund['name']; fund_code = fund['code']
@@ -129,11 +126,9 @@ def process_phase1_proposal(fund, fetcher, tracker, val_engine, analyst, market_
         # 3. 估值分析
         val_mult, val_desc = val_engine.get_valuation_status(fund_code, data)
         
-        # 4. 调用 AI IC (战术层 v6 接口)
+        # 4. 调用 AI IC (战术层 v19.6 接口)
         if analyst:
             macro_payload = {"net_flow": market_context.get('net_flow', 0), "leader_status": "UNKNOWN"}
-            
-            # 这里调用 news_analyst.py 中的新方法 analyze_fund_tactical_v6
             ic_res = analyst.analyze_fund_tactical_v6(
                 fund_name, tech, macro_payload, market_context.get('news_summary', ''), 
                 {"fuse_level": 0}, fund.get('strategy_type', 'core')
@@ -142,29 +137,40 @@ def process_phase1_proposal(fund, fetcher, tracker, val_engine, analyst, market_
             ic_res = None
 
         if not ic_res:
-            # 降级处理：无AI时仅依靠技术面
             decision = "HOLD" if tech['quant_score'] < 70 else "PROPOSE_EXECUTE"
             ic_res = {
-                "chairman_verdict": {"final_decision": decision, "logic_weighting": "AI 离线，基于规则运行"},
-                "strategy_meta": {"mode": "TREND", "rationale": "规则降级"},
+                "chairman_verdict": {"mode_selected": "D" if decision=="HOLD" else "A"},
+                "mode_justification": "AI 离线，基于规则运行",
                 "debate_transcript": {}
             }
 
-        # 5. 提取 IC 初步结论
+        # 5. v19.6.5 提取 IC 初步结论
         verdict = ic_res.get('chairman_verdict', {})
-        decision = verdict.get('final_decision', 'HOLD')
+        mode = verdict.get('mode_selected', 'D')
+        violation_check = ic_res.get('constraint_violation_check', {})
         
-        # 构造提案包
+        if violation_check.get('violated') == 'TRUE':
+            decision = "REJECT"
+            logic_weighting = f"⚠️系统拦截: {violation_check.get('violation_details')}"
+        elif mode in ['A', 'B', 'C']:
+            decision = "PROPOSE_EXECUTE"
+            logic_weighting = ic_res.get('mode_justification', f'确信度 {verdict.get("confidence", "-")}')
+        else:
+            decision = "HOLD"
+            logic_weighting = "进入D轨(防御/垃圾时间)或无明确进攻信号"
+
+        # 回写供后续流程提取
+        verdict['logic_weighting'] = logic_weighting
+        
         proposal = {
             "name": fund_name, "code": fund_code,
             "tech": tech, "val_mult": val_mult, "val_desc": val_desc,
-            "ic_res": ic_res, # 包含完整辩论
-            "decision": decision, # 初审决定
+            "ic_res": ic_res, 
+            "decision": decision, 
             "fund_obj": fund
         }
         
-        mode = ic_res.get('strategy_meta', {}).get('mode', '-')
-        logger.info(f"   -> IC初审: {decision} | 模式:{mode} | 逻辑:{verdict.get('logic_weighting','-')[:20]}...")
+        logger.info(f"   -> IC初审: {decision} | 模式:{mode} | 逻辑:{logic_weighting[:20]}...")
         return proposal
 
     except Exception as e:
@@ -190,8 +196,6 @@ def main():
     if analyst:
         logger.info("📡 正在进行宏观扫描与资金流检测...")
         news_text = analyst.get_market_context()
-        
-        # 🟢 [修改] 资金流检测改用 fetcher 的 API 获取 (替换原 scanner.get_market_vitality)
         net_flow_val = fetcher.get_market_net_flow()
         
         market_context = {
@@ -213,18 +217,18 @@ def main():
     proposals = []
     candidates_for_veto = [] 
     
-    # 单线程顺序执行，确保稳定
     for fund in funds:
         p = process_phase1_proposal(fund, fetcher, tracker, val_engine, analyst, market_context)
         if p:
             proposals.append(p)
-            # 只有建议执行的，才提交给风控委员会去审
             if 'EXECUTE' in p['decision'] and 'PROPOSE' in p['decision']:
+                verdict = p['ic_res'].get('chairman_verdict', {})
                 candidates_for_veto.append({
                     "code": p['code'],
                     "name": p['name'],
-                    "mode": p['ic_res'].get('strategy_meta', {}).get('mode', 'UNKNOWN'),
-                    "reason": p['ic_res'].get('chairman_verdict', {}).get('logic_weighting', '无'),
+                    "mode": verdict.get('mode_selected', 'UNKNOWN'),
+                    "reason": verdict.get('logic_weighting', '无'),
+                    "key_assumption": verdict.get('key_assumption', ''),
                     "tech_score": p['tech']['quant_score']
                 })
 
@@ -237,14 +241,22 @@ def main():
     approved_codes = []
     
     if candidates_for_veto and analyst:
-        # 一次性发送所有候选人进行压力测试
-        risk_report = analyst.run_risk_committee_veto(candidates_for_veto)
+        # v19.6.5 压力测试矩阵返回
+        risk_report_raw = analyst.run_risk_committee_veto(candidates_for_veto)
         
-        # 提取批准名单
-        for item in risk_report.get('approved_list', []):
-            approved_codes.append(item.get('code'))
+        # 适配 V19.6.5 的 stress_test_results
+        for item in risk_report_raw.get('stress_test_results', []):
+            code = item.get('code')
+            decision = item.get('veto_decision', 'VETO')
+            reason = item.get('adjustment_reason', '')
             
-        logger.info(f"✅ 风控批准: {len(approved_codes)} 个 | ❌ 风控驳回: {len(risk_report.get('rejected_log', []))} 个")
+            if decision in ['APPROVE', 'DEMOTE']:
+                approved_codes.append(code)
+                risk_report['approved_list'].append({"code": code, "reason": f"[{decision}] {reason}"})
+            else:
+                risk_report['rejected_log'].append({"code": code, "reason": f"[{decision}] {reason}"})
+                
+        logger.info(f"✅ 风控批准/降级: {len(approved_codes)} 个 | ❌ 风控驳回: {len(risk_report['rejected_log'])} 个")
     elif not candidates_for_veto:
         logger.info("👀 本轮无激进提案，跳过风控终审。")
 
@@ -258,66 +270,70 @@ def main():
     for p in proposals:
         code = p['code']
         raw_decision = p['decision']
+        verdict = p['ic_res'].get('chairman_verdict', {})
         
         # --- 核心逻辑：风控一票否决 ---
         final_decision = raw_decision
         
-        # 如果IC建议买，但风控没批，则驳回
         if 'PROPOSE_EXECUTE' in raw_decision:
             if code in approved_codes:
-                final_decision = 'EXECUTE' # 批准
-                # 追加风控评语
+                final_decision = 'EXECUTE' 
                 for item in risk_report.get('approved_list', []):
                     if item.get('code') == code:
-                        p['ic_res']['chairman_verdict']['logic_weighting'] += f" [✅风控终审: {item.get('reason')}]"
+                        verdict['logic_weighting'] += f" [✅风控终审: {item.get('reason')}]"
             else:
-                final_decision = 'REJECT'  # 驳回
-                # 追加驳回理由
+                final_decision = 'REJECT'  
                 for item in risk_report.get('rejected_log', []):
                     if item.get('code') == code:
-                        p['ic_res']['chairman_verdict']['logic_weighting'] += f" [❌风控驳回: {item.get('reason')}]"
+                        verdict['logic_weighting'] += f" [❌风控驳回: {item.get('reason')}]"
         
-        # 将 v19.6 的 PROPOSE_EXECUTE 转为 v13 算法能认的 EXECUTE
-        # 如果是 REJECT，在 calculate_position_v13 里会被归零
         calc_decision = "PASS"
-        if final_decision == "EXECUTE": calc_decision = "PASS" # 让算法基于分数决定
+        if final_decision == "EXECUTE": calc_decision = "PASS" 
         elif final_decision == "REJECT": calc_decision = "REJECT"
         elif final_decision == "HOLD_CASH": calc_decision = "HOLD_CASH"
         
-        # 计算具体仓位
         amt, lbl, is_sell, s_val = calculate_position_v13(
             p['tech'], 0, calc_decision, p['val_mult'], p['val_desc'],
             config['global']['base_invest_amount'], config['global']['max_daily_invest'],
             tracker.get_position(code), p['fund_obj'].get('strategy_type'), p['name']
         )
         
-        # 记录交易
         with tracker_lock:
             tracker.record_signal(code, lbl)
             if amt > 0: tracker.add_trade(code, p['name'], amt, p['tech']['price'])
             elif is_sell: tracker.add_trade(code, p['name'], s_val, p['tech']['price'], True)
             
-        # 构造适配 UI 的数据结构
-        # v19.6 的 ic_res 结构较深，需要 Flatten 给 UI
+        # 提取 v19.6.5 对话实录 (Technical/CGO/CRO 三方博弈)
         debate_str = ""
         trans = p['ic_res'].get('debate_transcript', {})
         if isinstance(trans, dict):
             for role, speech in trans.items():
-                debate_str += f"**{role}**: {speech}\n\n"
+                if isinstance(speech, dict):
+                    stance = speech.get('stance', '')
+                    content = speech.get('analysis', speech.get('odds_calculation', speech.get('tail_risk_scenario', '')))
+                    debate_str += f"**{role}** ({stance}): {content}\n\n"
+                else:
+                    debate_str += f"**{role}**: {speech}\n\n"
+        
+        # 将假设前提和硬止损塞入执行笔记供 UI 展示
+        key_assumption = verdict.get('key_assumption', '')
+        hard_stop = verdict.get('hard_stop_loss', '')
+        time_stop = verdict.get('time_stop', '')
+        if key_assumption or hard_stop:
+            debate_str += f"---\n"
+            if key_assumption: debate_str += f"**💠核心前提**: {key_assumption}\n"
+            if hard_stop: debate_str += f"**🛡️硬止损**: {hard_stop} | **时限**: {time_stop}\n"
         
         ai_full_adapted = {
             "strategy_meta": {
-                "mode": p['ic_res'].get('strategy_meta', {}).get('mode', 'UNKNOWN'),
-                "rationale": p['ic_res'].get('chairman_verdict', {}).get('logic_weighting', '无逻辑')
+                "mode": verdict.get('mode_selected', 'UNKNOWN'),
+                "rationale": verdict.get('logic_weighting', '无逻辑')
             },
             "trend_analysis": {
-                # 将天数透传给 UI
                 "days_to_event": p['ic_res'].get('days_to_event', 'NULL'),
                 "stage": f"Tech:{p['tech']['quant_score']}分"
             },
-            # 将辩论过程塞入 execution_notes 供 UI 显示
-            "execution_notes": debate_str[:500],
-            # 将风控结果塞入 risk_audit
+            "execution_notes": debate_str[:800], # 调大截断，容纳三方博弈和前提条件
             "cro_risk_audit": {
                 "fundamental_check": "Risk Checked" if code in approved_codes else "See Reject Log"
             }
@@ -330,21 +346,20 @@ def main():
             "ai_full": ai_full_adapted
         })
 
-    # 生成 CIO 战略报告
     cio_html = ""
     if analyst:
         logger.info("🧠 正在生成 CIO 战略定调 (基于风控报告)...")
-        # 传入风控报告 JSON 供 CIO 参考
+        # 直接把 raw JSON 丢过去，那边会处理结构
         cio_html = analyst.generate_cio_strategy(
             datetime.now().strftime("%Y-%m-%d"), 
-            risk_report
+            risk_report_raw if 'risk_report_raw' in locals() else risk_report
         )
         
-    # 渲染 HTML (使用 v19.3/v19.1 的渲染器均可)
+    # 渲染最新版 HTML (引入 Variance: Zero 主题)
     html = render_html_report_v19(all_news_seen, final_results, cio_html, "") 
     
-    subject_prefix = "🚧 [测试] " if TEST_MODE else "🕊️ "
-    send_email(f"{subject_prefix}鹊知风 v19.7 认知对抗报告", html)
+    subject_prefix = "🚧 [测试] " if TEST_MODE else "💠 "
+    send_email(f"{subject_prefix}Variance: Zero 认知对抗全量化报告", html)
     
     logger.info("✅ 运行结束，邮件已发送。")
 
