@@ -447,8 +447,8 @@ crowdedness = (rsi_normalized × 0.3) + (recent_gain_percentile × 0.3) + (media
     }},
     "stress_test_results": [
         {{
-            "code": "{fund_code}",
-            "name": "{fund_name}",
+            "code": "{{fund_code}}",
+            "name": "{{fund_name}}",
             "ic_proposal": {{
                 "mode": "A|B|C",
                 "position": "X%",
