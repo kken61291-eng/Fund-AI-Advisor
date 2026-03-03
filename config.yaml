@@ -1,7 +1,7 @@
 global:
   base_invest_amount: 1000      # 单次基准定投金额
   max_daily_invest: 5000        # 单日最大投入上限
-  max_position_per_fund: 0.15   # 单只最大持仓 (25个标的，建议降至15%以分散风险)
+  max_position_per_fund: 0.15   # 单只最大持仓 (当前50个标的，若需极端分散可考虑降至0.05-0.10)
 
 funds:
   # ==========================================
@@ -193,3 +193,190 @@ funds:
     index_name: "sh000066"
     # [关键词] 覆盖原油与化工周期
     sector_keyword: "能源化工 原油期货 甲醇 PTA 乙二醇 煤化工 原油价格 地缘政治 供给冲击 通胀对冲 OPEC"
+
+  # ==========================================
+  # 6. Geopolitics & Resources (中东冲突/地缘博弈)
+  # ==========================================
+  - name: "军工ETF"
+    code: "512660"
+    strategy_type: "satellite"
+    index_name: "sh399967"
+    # [关键词] 覆盖中东冲突防御与军工装备
+    sector_keyword: "中东冲突 军工装备 地缘政治 航母 大飞机 商业航天 卫星导航 国防安全 军工企业 避险"
+
+  - name: "油气ETF"
+    code: "159697"
+    strategy_type: "hedge"
+    index_name: "h11074"
+    # [关键词] 覆盖中东冲突带来的原油供给冲击
+    sector_keyword: "中东冲突 原油价格 三桶油 油气开采 能源安全 欧佩克 供给冲击 通胀 避险情绪 俄乌局势"
+
+  - name: "白银ETF"
+    code: "159822"
+    strategy_type: "hedge"
+    index_name: "sz161226"
+    # [关键词] 覆盖地缘冲突避险与贵金属
+    sector_keyword: "中东冲突 白银 贵金属 避险资产 金银比 工业属性 货币超发 货币政策 现货白银 资源股"
+
+  - name: "航运ETF"
+    code: "159847"
+    strategy_type: "satellite"
+    index_name: "sh931555"
+    # [关键词] 覆盖红海危机与全球供应链
+    sector_keyword: "中东冲突 航运 港口 红海危机 运价上涨 供应链 集装箱 散货船 国际贸易 波罗的海干散货指数"
+
+  # ==========================================
+  # 7. Hot Themes (同花顺热门/近期资金风口)
+  # ==========================================
+  - name: "消费电子ETF"
+    code: "159732"
+    strategy_type: "satellite"
+    index_name: "sz980030"
+    # [关键词] 覆盖AI硬件与果链复苏
+    sector_keyword: "同花顺热门 消费电子 苹果产业链 华为概念 AI手机 AI-PC 折叠屏 混合现实 智能穿戴 换机周期"
+
+  - name: "电池ETF"
+    code: "159755"
+    strategy_type: "satellite"
+    index_name: "sz399976"
+    # [关键词] 覆盖固态电池与新技术迭代
+    sector_keyword: "同花顺热门 固态电池 宁德时代 锂矿 动力电池 储能 新能源车 碳酸锂 续航里程 电池回收"
+
+  - name: "传媒ETF"
+    code: "512980"
+    strategy_type: "satellite"
+    index_name: "sh399971"
+    # [关键词] 覆盖AI多模态应用与谷子经济
+    sector_keyword: "同花顺热门 AI应用 Sora概念 谷子经济 短剧游戏 影视院线 内容变现 知识产权 抖音概念 虚拟人"
+
+  - name: "创新药ETF"
+    code: "159992"
+    strategy_type: "satellite"
+    index_name: "sz399986"
+    # [关键词] 覆盖减肥药与医药出海
+    sector_keyword: "同花顺热门 创新药 减肥药 恒瑞医药 药明康德 CXO 临床试验 医保谈判 医药出海 生物技术"
+
+  - name: "汽车ETF"
+    code: "516110"
+    strategy_type: "satellite"
+    index_name: "sh931008"
+    # [关键词] 覆盖无人驾驶与飞行汽车
+    sector_keyword: "同花顺热门 无人驾驶 飞行汽车 低空经济 汽车整车 智能网联 比亚迪 华为汽车 汽车出海 价格战"
+
+  # ==========================================
+  # 8. 15th Five-Year Plan (十五五规划/国家战略)
+  # ==========================================
+  - name: "信创ETF"
+    code: "159537"
+    strategy_type: "satellite"
+    index_name: "sh932029"
+    # [关键词] 覆盖科技自立自强与基础软件
+    sector_keyword: "十五五规划 信创 国产替代 软件开发 操作系统 数据库 网络安全 数据要素 科技自立自强 基础软件"
+
+  - name: "数字经济ETF"
+    code: "159658"
+    strategy_type: "satellite"
+    index_name: "sh931582"
+    # [关键词] 覆盖数字中国与算力底座
+    sector_keyword: "十五五规划 数字经济 算力底座 数据中心 东数西算 产业数字化 数据资产 人工智能 平台经济 新基建"
+
+  - name: "绿电ETF"
+    code: "562550"
+    strategy_type: "satellite"
+    index_name: "sh931700"
+    # [关键词] 覆盖绿色低碳转型
+    sector_keyword: "十五五规划 绿色电力 碳中和 碳交易 新型电力系统 风电 光伏 绿证 水电 能源转型"
+
+  - name: "医疗器械ETF"
+    code: "159883"
+    strategy_type: "satellite"
+    index_name: "sz399989"
+    # [关键词] 覆盖银发经济与医疗设备更新
+    sector_keyword: "十五五规划 银发经济 养老产业 医疗器械 迈瑞医疗 国产替代 医疗设备 更新改造 集采 耗材"
+
+  - name: "央企红利ETF"
+    code: "561580"
+    strategy_type: "dividend"
+    index_name: "sh000861"
+    # [关键词] 覆盖国资委市值管理考核
+    sector_keyword: "十五五规划 央企市值管理 国企改革 中特估 高股息 稳定分红 价值重估 煤炭石油 建筑装饰 护城河"
+
+  # ==========================================
+  # 9. Industry Core (行业主题扩充) - 补齐核心拼图
+  # ==========================================
+  - name: "消费ETF"
+    code: "159928"
+    strategy_type: "core"
+    index_name: "sz000932"
+    # [关键词] 覆盖内需复苏核心
+    sector_keyword: "主要消费 内需复苏 促消费 白酒 贵州茅台 提价 居民收入 烟火气 消费降级 必需消费"
+
+  - name: "医疗ETF"
+    code: "512170"
+    strategy_type: "core"
+    index_name: "sh399989"
+    # [关键词] 覆盖老龄化刚需
+    sector_keyword: "医药生物 医疗保健 老龄化 刚性需求 爱尔眼科 药店 医疗服务 医美 消费医疗 创新升级"
+
+  - name: "房地产ETF"
+    code: "512200"
+    strategy_type: "satellite"
+    index_name: "sh000952"
+    # [关键词] 覆盖化债与政策底
+    sector_keyword: "房地产 政策底 保交楼 城中村改造 降首付 存量房贷 保利发展 万科A 销售数据 地产链"
+
+  - name: "基建ETF"
+    code: "516950"
+    strategy_type: "satellite"
+    index_name: "sh930608"
+    # [关键词] 覆盖逆周期调节
+    sector_keyword: "基础建设 专项债 稳增长 逆周期调节 中国建筑 高铁轨交 建筑材料 水利工程 老旧小区改造 地方化债"
+
+  - name: "家电ETF"
+    code: "159996"
+    strategy_type: "satellite"
+    index_name: "sh000927"
+    # [关键词] 覆盖出海与以旧换新
+    sector_keyword: "家用电器 以旧换新 出海 美的集团 海尔智家 地产后周期 消费升级 白电 智能家居 铜价"
+
+  - name: "农业ETF"
+    code: "159825"
+    strategy_type: "satellite"
+    index_name: "sz399668"
+    # [关键词] 覆盖粮食安全与猪周期
+    sector_keyword: "农业种植 粮食安全 种业振兴 转基因 猪肉周期 温氏股份 牧原股份 农产品价格 厄尔尼诺 乡村振兴"
+
+  - name: "煤炭ETF"
+    code: "515220"
+    strategy_type: "dividend"
+    index_name: "sh399998"
+    # [关键词] 覆盖高股息防御与资源
+    sector_keyword: "煤炭开采 动力煤 焦煤 中国神华 高股息 能源保供 煤电联营 顺周期 资源枯竭 避险资产"
+
+  - name: "白酒ETF"
+    code: "512690"
+    strategy_type: "satellite"
+    index_name: "sh399997"
+    # [关键词] 覆盖高端消费与批价
+    sector_keyword: "白酒 泸州老窖 贵州茅台 山西汾酒 消费复苏 批价 商务宴请 提价 去库存 核心资产"
+
+  - name: "旅游ETF"
+    code: "562510"
+    strategy_type: "satellite"
+    index_name: "sh930633"
+    # [关键词] 覆盖体验经济与出行链
+    sector_keyword: "旅游酒店 航空机场 冰雪经济 免税 中国中免 出行链 报复性消费 假日经济 签证便利化 体验经济"
+
+  - name: "纳指生物科技ETF"
+    code: "513290"
+    strategy_type: "satellite"
+    index_name: "NBI"
+    # [关键词] 覆盖全球尖端生物科技
+    sector_keyword: "美股医药 纳斯达克 生物科技 减肥药 基因编辑 创新药出海 FDA审批 降息利好 跨国药企 全球视野"
+
+  - name: "中概互联ETF"
+    code: "513220"
+    strategy_type: "satellite"
+    index_name: "h11136"
+    # [关键词] 覆盖海外中国互联网巨头
+    sector_keyword: "中概股 互联网 腾讯 阿里巴巴 拼多多 平台经济 监管常态化 消费复苏 海外资金 估值修复"
