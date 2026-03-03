@@ -11,7 +11,7 @@ from ta.volume import OnBalanceVolumeIndicator, VolumeWeightedAveragePrice
 
 class TechnicalAnalyzer:
     """
-    技术分析器 - V17.1 (适配 v3.5 四态架构 - 全量版)
+    技术分析器 - V17.2 (适配 v3.5 四态架构 - CRO风控升级全量版)
     """
     
     def __init__(self, asset_type='ETF'):
@@ -94,7 +94,7 @@ class TechnicalAnalyzer:
             indicators['volatility_status'] = vol_status
             indicators['atr'] = round(atr, 3)
 
-            # [C] 趋势打分 (Trend Score 0-100)
+            # [C] 趋势打分 (Trend Score 0-100) - 已接入CRO风控惩罚模型
             indicators['quant_score'] = self._calculate_trend_score(close, rsi, macd_diff, macd_line, ma20, ma60)
 
             # [D] 相对强弱 (RS Rating)
@@ -134,27 +134,47 @@ class TechnicalAnalyzer:
 
     def _calculate_trend_score(self, close, rsi, macd_hist, macd_val, ma20, ma60):
         """
-        计算 0-100 的趋势分 (v3.5 核心)
+        计算 0-100 的趋势分 (v3.5 CRO升级版)
+        核心改动：引入非线性风控惩罚机制，解决“高位超买标的满分溢出”的致命缺陷。
         """
         score = 50
         price = close.iloc[-1]
         
-        # 1. 均线分 (权重 40)
+        # 1. 基础结构分 (满分30)：奖励均线多头形态，但不给予过度溢价
         if price > ma20: score += 10
         if price > ma60: score += 10
-        if ma20 > ma60: score += 20  # 多头排列
+        if ma20 > ma60: score += 10
         
-        # 2. 动量分 (权重 30)
-        if rsi > 50: score += 10
-        if macd_hist > 0: score += 10
-        if macd_val > 0: score += 10
+        # 2. 动量质量分 (满分20)：仅在健康区间给予奖励
+        # 修正原先只要RSI>50就无脑加分的逻辑，改为健康上涨区间才加分
+        if 50 < rsi <= 75: score += 10
+        if macd_val > 0: score += 5
+        if macd_hist > 0: score += 5
         
-        # 3. 扣分项 (弱势惩罚)
-        if price < ma20: score -= 10
-        if price < ma60: score -= 15
-        if rsi < 30: score -= 10 # 极弱
+        # 3. CRO 核心风控：非线性极致惩罚项 (直接击穿底分)
         
-        return max(0, min(100, score))
+        # [核心惩罚 A] 乖离率 (Bias) 测算：严惩脱离均线的高位加速
+        bias_20 = ((price - ma20) / ma20) * 100
+        if bias_20 > 15:
+            score -= 40  # 极度超买，直接剥夺满分可能，防追高核按钮
+        elif bias_20 > 8:
+            score -= 15  # 高度警惕，限制得分上限
+            
+        # [核心惩罚 B] RSI 极端情绪惩罚：严惩山顶狂热与深渊极寒
+        if rsi > 85:
+            score -= 40  # 情绪沸腾，散户接盘期，重度扣分
+        elif rsi > 75:
+            score -= 20
+        elif rsi < 30:
+            score -= 20  # 极度弱势，动能衰竭
+        elif rsi < 40:
+            score -= 10
+            
+        # [核心惩罚 C] 均线破位惩罚：趋势反转的左侧确认
+        if price < ma20: score -= 15
+        if price < ma60: score -= 20
+        
+        return int(max(0, min(100, score)))
 
     def _calculate_rs_rating(self, close):
         """
