@@ -102,7 +102,7 @@ def _parse_cio_json_to_html(text):
         return _md_to_html(text) 
 
 def render_html_report_v19(news_list, results, cio_review, advisor_review):
-    """V20.0 UI 渲染器 - 全中文赛博美学版 (鹊知风)"""
+    """V20.0 UI 渲染器 - 全中文赛博美学版 (带动态侧边指示带)"""
     
     COLOR_CYBER = "#00d2ff"     
     COLOR_CYBER_SEC = "#00f0ff" 
@@ -138,9 +138,12 @@ def render_html_report_v19(news_list, results, cio_review, advisor_review):
                           text-transform: uppercase; letter-spacing: 1px; }}
         .content-text {{ font-size: 14px; line-height: 1.7; color: {COLOR_TEXT_MAIN}; }}
         
+        /* 引入 CSS 变量(--indicator-color) 控制侧边发光条颜色 */
         .fund-card {{ border: 1px solid {COLOR_BORDER}; border-radius: 4px; margin-bottom: 25px; 
                       background: {COLOR_BG_CARD}; position: relative; }}
-        .fund-card::after {{ content: ''; position: absolute; left: -1px; top: 20%; bottom: 20%; width: 2px; background: {COLOR_CYBER}; box-shadow: 0 0 8px {COLOR_CYBER}; }}
+        .fund-card::after {{ content: ''; position: absolute; left: -1px; top: 20%; bottom: 20%; width: 2px; 
+                             background: var(--indicator-color, {COLOR_CYBER}); 
+                             box-shadow: 0 0 8px var(--indicator-color, {COLOR_CYBER}); transition: all 0.3s ease; }}
         
         .card-head {{ background: rgba(0, 210, 255, 0.03); padding: 15px; 
                       display: flex; justify-content: space-between; align-items: center; 
@@ -156,7 +159,7 @@ def render_html_report_v19(news_list, results, cio_review, advisor_review):
         
         .mode-label {{ font-size: 10px; padding: 2px 6px; border-radius: 2px; 
                        border: 1px solid {COLOR_CYBER_SEC}; margin-right: 8px; background: rgba(0,240,255,0.1); 
-                       color: {COLOR_CYBER_SEC}; box-shadow: 0 0 5px rgba(0,240,255,0.3); }}
+                       color: {COLOR_CYBER_SEC}; box-shadow: 0 0 5px rgba(0,240,255,0.3); display: inline-block; vertical-align: middle; }}
         
         .quant-grid {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; padding: 15px; background: transparent; }}
         .q-item {{ display: flex; flex-direction: column; padding: 10px; 
@@ -173,7 +176,7 @@ def render_html_report_v19(news_list, results, cio_review, advisor_review):
         
         .tactical-note {{ margin-top: 12px; padding: 12px; background: rgba(0, 210, 255, 0.05); 
                           border-radius: 2px; font-size: 12px; color: #a1b8d1; 
-                          border-left: 2px solid {COLOR_CYBER}; line-height: 1.6; }}
+                          border-left: 2px solid var(--indicator-color, {COLOR_CYBER}); line-height: 1.6; }}
         
         .event-countdown {{ margin-top: 10px; font-size: 12px; color: {COLOR_CYBER_SEC}; font-weight: bold; }}
         
@@ -266,21 +269,28 @@ def render_html_report_v19(news_list, results, cio_review, advisor_review):
         rationale = _md_to_html(meta.get('rationale', '系统未提供逻辑'))
         exec_note = _md_to_html(ai_full.get('execution_notes', ''))
         
+        # 动态计算颜色逻辑
         badge_cls, badge_txt = "bg-gray", "[观望防守]"
+        indicator_color = COLOR_CYBER # 默认发蓝光(观望)
+        
         if decision == "EXECUTE" or "买入" in decision:
             badge_cls, badge_txt = "bg-red", f"[做多/买入] ¥{amount:,}"
+            indicator_color = COLOR_RED # 买入发红光(赛博粉)
         elif decision == "SELL" or "卖出" in decision:
             badge_cls, badge_txt = "bg-green", "[做空/清仓]"
+            indicator_color = COLOR_GREEN # 卖出发绿光
         elif decision == "HOLD_CASH" or "空仓" in decision:
             badge_cls, badge_txt = "bg-gray", "[强制空仓]"
+            indicator_color = COLOR_TEXT_SUB # 强制空仓发暗灰光
             
         gain_cls = "pos" if recent_gain > 0 else "neg"
         
+        # 注入 style="--indicator-color: X" 动态变量
         html += f"""
-        <div class="fund-card">
+        <div class="fund-card" style="--indicator-color: {indicator_color};">
             <div class="card-head">
                 <div>
-                    <span class="mode-label">{mode}</span>
+                    <span class="mode-label" style="border-color: {indicator_color}; color: {indicator_color}; box-shadow: 0 0 5px {indicator_color}4d;">{mode}</span>
                     <span class="fund-name">{name}</span>
                     <span class="fund-code">[{code}]</span>
                 </div>
