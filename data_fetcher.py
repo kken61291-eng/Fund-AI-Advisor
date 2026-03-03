@@ -1,15 +1,13 @@
 import pandas as pd
 import numpy as np
 import time
-import random
 import os
 import yaml
 import logging
 import gc
 import sys
-from datetime import datetime, time as dt_time
-from typing import Optional, List, Dict, Tuple
-from dataclasses import dataclass
+from datetime import datetime
+from typing import Optional, List
 
 # 检查依赖
 try:
@@ -66,19 +64,17 @@ class DataFetcher:
     def _create_session(self, use_proxy: bool = True):
         self._close_session()
         try:
+            proxies = None
             if use_proxy and SCRAPERAPI_KEY:
                 proxy_url = self._get_scraperapi_proxy()
-                self.session = cffi_requests.Session(
-                    impersonate="chrome120",
-                    proxies={"http": proxy_url, "https": proxy_url},
-                    timeout=15,
-                    verify=False 
-                )
-            else:
-                self.session = cffi_requests.Session(
-                    impersonate="chrome120",
-                    timeout=15 
-                )
+                proxies = {"http": proxy_url, "https": proxy_url}
+                
+            self.session = cffi_requests.Session(
+                impersonate="chrome120",
+                proxies=proxies,
+                timeout=15,
+                verify=False 
+            )
         except Exception as e:
             logger.error(f"❌ 创建 session 失败: {e}")
             raise
@@ -91,7 +87,7 @@ class DataFetcher:
             gc.collect()
 
     def _safe_request(self, url: str, params: dict, headers: dict, max_retries: int = 2) -> Optional[dict]:
-        use_proxy_first = True if SCRAPERAPI_KEY else False
+        use_proxy_first = bool(SCRAPERAPI_KEY)
         if self.session is None:
             self._create_session(use_proxy=use_proxy_first)
 
@@ -128,10 +124,8 @@ class DataFetcher:
         secids_list = []
         for code in codes:
             c = str(code).strip()
-            if c.startswith('5') or c.startswith('6'):
-                secids_list.append(f"1.{c}")
-            else:
-                secids_list.append(f"0.{c}")
+            # 区分沪深市场前缀
+            secids_list.append(f"1.{c}" if c.startswith('5') or c.startswith('6') else f"0.{c}")
         
         secids_str = ",".join(secids_list)
         
@@ -139,7 +133,7 @@ class DataFetcher:
         
         params = {
             "fltt": "2",
-            "invt": "2",  # 🟢 修复 1：核心参数！保证返回实时价格而非 "-"
+            "invt": "2",  # 🟢 核心参数！保证返回实时价格而非 "-"
             "secids": secids_str,
             "fields": "f12,f14,f2,f3,f4,f5,f6,f7,f8,f15,f16,f17,f18",
             "_": str(int(time.time() * 1000))
@@ -172,6 +166,66 @@ class DataFetcher:
             return df.set_index('code')
         else:
             return None
+
+    def fetch_fund_history_api(self, fund_code: str) -> Optional[pd.DataFrame]:
+        code = str(fund_code).strip().lower().replace('sh', '').replace('sz', '')
+        secid = f"1.{code}" if code.startswith(('5', '6')) else f"0.{code}"
+        
+        url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+        params = {
+            "secid": secid,
+            "klt": "101",        # 101代表日K
+            "fqt": "1",          # 1代表前复权
+            "lmt": "1500",       # 获取最近1500个交易日历史 (约6年)
+            "end": "20500101",   # 结束日期设为未来
+            "iscca": "1",
+            "fields1": "f1,f2,f3,f4,f5",
+            "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+            "_": str(int(time.time() * 1000))
+        }
+        
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        }
+        
+        data = self._safe_request(url, params, headers, max_retries=3)
+        if not data or 'data' not in data or not data['data'] or 'klines' not in data['data']:
+            return None
+            
+        klines = data['data']['klines']
+        if not klines:
+            return None
+            
+        parsed_data = []
+        for k in klines:
+            parts = str(k).split(',')
+            if len(parts) >= 11:
+                try:
+                    parsed_data.append({
+                        'date': pd.to_datetime(parts[0]),
+                        'open': float(parts[1]) if parts[1] != '-' else np.nan,
+                        'close': float(parts[2]) if parts[2] != '-' else np.nan,
+                        'high': float(parts[3]) if parts[3] != '-' else np.nan,
+                        'low': float(parts[4]) if parts[4] != '-' else np.nan,
+                        'volume': float(parts[5]) if parts[5] != '-' else np.nan,
+                        'amount': float(parts[6]) if parts[6] != '-' else np.nan,
+                        'amplitude': float(parts[7]) if parts[7] != '-' else np.nan,
+                        'pct_change': float(parts[8]) if parts[8] != '-' else np.nan,
+                        'change': float(parts[9]) if parts[9] != '-' else np.nan,
+                        'turnover_rate': float(parts[10]) if parts[10] != '-' else np.nan,
+                        'fetch_time': get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                except Exception:
+                    continue
+                    
+        if not parsed_data:
+            return None
+            
+        df = pd.DataFrame(parsed_data)
+        # 过滤异常的空行数据
+        df = df[df['close'] > 0.001]
+        df.set_index('date', inplace=True)
+        return df
 
     def init_spot_data(self) -> bool:
         today = get_beijing_time().strftime("%Y-%m-%d")
@@ -208,13 +262,10 @@ class DataFetcher:
             row = self.spot_data_cache.loc[code]
             today = pd.Timestamp(get_beijing_time().date())
             
-            # 🟢 修复 2：禁止将空值或 "-" 转化为 0.0
             def to_float(x):
                 try:
-                    if x is None or str(x).strip() == '-' or str(x).strip() == '':
-                        return np.nan
-                    return float(x)
-                except:
+                    return float(x) if x and str(x).strip() not in ('-', '') else np.nan
+                except (ValueError, TypeError):
                     return np.nan
             
             new_data = {
@@ -229,11 +280,9 @@ class DataFetcher:
                 'pct_change': to_float(row.get('pct_change')),
                 'change': to_float(row.get('change')),
                 'turnover_rate': to_float(row.get('turnover_rate')),
-                'fetch_time': get_beijing_time().strftime("%Y-%m-%d %H:%M:%S"),
-                'source': 'eastmoney_spot'
+                'fetch_time': get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
             }
             
-            # 🟢 修复 3：价格为 NaN 或 0 时，绝不入库，防止污染历史
             if pd.isna(new_data['close']) or new_data['close'] <= 0.001:
                 logger.warning(f"⚠️ {fund_code} 价格数据无效(可能停牌或非交易时间)，跳过保存")
                 return False
@@ -245,16 +294,34 @@ class DataFetcher:
             if os.path.exists(path):
                 try:
                     df_old = pd.read_csv(path, index_col='date', parse_dates=['date'])
+                    
+                    # 🟢 核心修复区：发现文件存在，但数据行数极少（比如只有今天的数据），照样触发历史补全
+                    if len(df_old) < 100:
+                        logger.info(f"🔄 发现 {fund_code} 历史数据不足 ({len(df_old)} 条)，正在自动拉取历史 K 线补全...")
+                        df_history = self.fetch_fund_history_api(fund_code)
+                        if df_history is not None and not df_history.empty:
+                            df_old = pd.concat([df_history, df_old])
+                            df_old = df_old[~df_old.index.duplicated(keep='last')].sort_index()
+                            logger.info(f"✅ {fund_code} 历史数据补全完毕 ({len(df_old)} 条)")
+
                     if today in df_old.index:
                         df_old.update(df_new)
                         df_final = df_old
                     else:
                         df_final = pd.concat([df_old, df_new])
                     df_final = df_final[~df_final.index.duplicated(keep='last')].sort_index()
-                except:
+                except Exception:
                     df_final = df_new
             else:
-                df_final = df_new
+                logger.info(f"🆕 发现新增标的 {fund_code}，正在自动拉取历史 K 线...")
+                df_history = self.fetch_fund_history_api(fund_code)
+                if df_history is not None and not df_history.empty:
+                    df_final = pd.concat([df_history, df_new])
+                    df_final = df_final[~df_final.index.duplicated(keep='last')].sort_index()
+                    logger.info(f"✅ {fund_code} 历史数据拉取并合并完毕 ({len(df_final)} 条)")
+                else:
+                    logger.warning(f"⚠️ {fund_code} 历史数据拉取失败，仅保存今日数据")
+                    df_final = df_new
             
             df_final = df_final.reindex(columns=self.UNIFIED_COLUMNS)
             df_final.to_csv(path)
@@ -285,9 +352,8 @@ class DataFetcher:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
             
-            # 🟢 修复 4：自动排毒，删掉之前保存进去的 0.0 错误行
+            # 🟢 自动排毒，删掉之前保存进去的 0.0 错误行
             df = df[df['close'] > 0.001]
-            
             return df
         except Exception as e:
             logger.error(f"❌ 读取历史数据失败 {fund_code}: {e}")
@@ -304,9 +370,7 @@ class DataFetcher:
             data = self._safe_request(url, params, headers)
             if not data or 'diff' not in data.get('data', {}): return 0.0
             
-            total_flow = 0.0
-            for item in data['data']['diff']:
-                total_flow += float(item.get('f62', 0))
+            total_flow = sum(float(item.get('f62', 0)) for item in data['data']['diff'])
             return round(total_flow / 100000000, 2)
         except Exception as e:
             logger.error(f"❌ 获取宏观资金流失败: {e}")
@@ -337,7 +401,7 @@ class DataFetcher:
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("🚀 DataFetcher V24.4 (Anti-Poison Data Fix)")
+    print("🚀 DataFetcher V24.7 (Smart Auto-Fetch History Mode)")
     print("=" * 60)
     
     funds = []
