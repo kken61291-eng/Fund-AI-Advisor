@@ -1,0 +1,80 @@
+name: News Data Crawler
+
+on:
+  schedule:
+    # 每 2 小时执行一次 (UTC 时间，相当于全天候每两小时触发)
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
+
+# 必须赋予写入权限
+permissions:
+  contents: write
+
+jobs:
+  fetch_news_data:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Shanghai
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        # [关键] 获取完整历史，避免 push 冲突
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+        # 强制升级 akshare 到最新版
+        pip install --upgrade akshare
+
+    # ----------------------------------------------------------------
+    # 步骤 1: 抓取 7x24 全球财经电报 (News)
+    # ----------------------------------------------------------------
+    - name: 🕷️ Run News Crawler
+      # 🟢 [关键修改] 同样注入 Key，防止新闻接口也需要代理
+      env:
+        SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
+      run: |
+        python news_loader.py
+
+    # ----------------------------------------------------------------
+    # 步骤 2: 提交并保存数据
+    # ----------------------------------------------------------------
+    - name: 💾 Commit and Push News Data
+      run: |
+        # 配置 git 用户
+        git config --global user.name "GitHub Action"
+        git config --global user.email "action@github.com"
+
+        # 添加新闻数据目录
+        git add data_news/ || true
+
+        # 检查是否有变动
+        if [[ -n $(git status --porcelain) ]]; then
+          echo "检测到新闻数据更新，正在提交..."
+          git commit -m "📰 Auto-update News data [skip ci]"
+
+          # [关键修复] 先拉取远程更新，避免冲突
+          echo "正在同步远程更改..."
+          git pull origin main --rebase || git pull origin master --rebase || true
+
+          # 推送（带重试机制）
+          for i in 1 2 3; do
+            echo "尝试推送 (第 $i 次)..."
+            git push && break
+            echo "推送失败，等待后重试..."
+            sleep 3
+            git pull --rebase
+          done
+        else
+          echo "No new news data found, skipping commit."
+        fi
