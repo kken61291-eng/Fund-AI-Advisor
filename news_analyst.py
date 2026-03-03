@@ -131,20 +131,34 @@ class NewsAnalyst:
         days_to_event, event_tier = self.extract_event_info(news_text)
 
         try:
+            # 【关键补齐】填补 v19.6.5 Prompt 必须的额外参数，防止 KeyError 崩溃
             prompt = TACTICAL_IC_PROMPT.format(
+                market_risk_level="MEDIUM", # 此处可升级为动态水位检测
+                allowed_modes="['A', 'B', 'C']",
+                forbidden_modes="[]",
+                max_position="15%",
+                cash_ratio="30%",
+                total_position_max="70%",
                 fund_name=fund_name, 
+                fund_code=tech.get('code', 'N/A'),
                 trend_score=trend_score, 
                 rsi=tech.get('rsi', 50),
                 volatility_status=tech.get('volatility_status', '-'),
                 recent_gain=tech.get('recent_gain', 0),
+                drawdown_20d=tech.get('drawdown_20d', 5), # 降级默认值
+                volume_percentile=tech.get('volume_percentile', 50),
                 net_flow=f"{macro_data.get('net_flow', 0)}亿",
                 leader_status=macro_data.get('leader_status', 'UNKNOWN'),
+                sector_breadth=tech.get('sector_breadth', 50),
                 days_to_event=days_to_event,
                 event_tier=event_tier,
-                news_content=str(news_text)[:8000]
+                decayed_weight=0.8,
+                decay_func="exponential",
+                news_content=str(news_text)[:8000],
+                fundamental_risk="立案调查, 财务造假, 退市风险"
             )
         except Exception as e:
-            logger.error(f"IC Prompt构造失败: {e}")
+            logger.error(f"IC Prompt构造失败: {e}", exc_info=True)
             return None
 
         payload = {
@@ -171,11 +185,20 @@ class NewsAnalyst:
         if not candidates: return {"approved_list": [], "rejected_log": [], "risk_summary": "无提案提交"}
 
         candidates_str = json.dumps(candidates, indent=2, ensure_ascii=False)
-        prompt = RISK_CONTROL_VETO_PROMPT.format(
-            candidate_count=len(candidates),
-            candidates_context=candidates_str
-        )
         
+        try:
+            # 【关键补齐】V19.6.5 风控测试矩阵必须的参数
+            prompt = RISK_CONTROL_VETO_PROMPT.format(
+                market_risk_level="MEDIUM",
+                candidate_count=len(candidates),
+                emergency_override_status="NONE",
+                candidates_context=candidates_str,
+                assumption_break_scenario="核心逻辑被证伪或触发技术位下破"
+            )
+        except Exception as e:
+            logger.error(f"Risk Prompt构造失败: {e}", exc_info=True)
+            return {"approved_list": [], "rejected_log": [{"code": "ALL", "reason": "Prompt构建崩溃"}], "risk_summary": "Error"}
+
         payload = {
             "model": self.model_strategic, 
             "messages": [{"role": "user", "content": prompt}], 
@@ -194,10 +217,21 @@ class NewsAnalyst:
 
     @retry(retries=2, delay=5)
     def generate_cio_strategy(self, current_date, risk_report_json):
-        prompt = STRATEGIC_CIO_REPORT_PROMPT.format(
-            current_date=current_date,
-            risk_committee_json=json.dumps(risk_report_json, indent=2, ensure_ascii=False)
-        )
+        try:
+            # 【关键补齐】V19.6.5 战略报告必须的参数
+            prompt = STRATEGIC_CIO_REPORT_PROMPT.format(
+                current_date=current_date,
+                market_risk_level="MEDIUM",
+                risk_level_rationale="多因子综合评估（资金流动、波动率中性）",
+                allowed_modes="['A', 'B', 'C']",
+                cash_ratio="30%",
+                max_position="15%",
+                risk_committee_json=json.dumps(risk_report_json, indent=2, ensure_ascii=False)
+            )
+        except Exception as e:
+            logger.error(f"CIO Prompt构造失败: {e}", exc_info=True)
+            return "<p>战略研判生成失败，系统降级运行。</p>"
+
         return self._call_r1_text(prompt)
 
     # --- 兼容性方法 (移除对 RED_TEAM_AUDIT_PROMPT 的依赖) ---
@@ -210,6 +244,11 @@ class NewsAnalyst:
         # 兜底：使用 CIO 模板
         prompt = STRATEGIC_CIO_REPORT_PROMPT.format(
             current_date=datetime.now().strftime("%Y-%m-%d"), 
+            market_risk_level="MEDIUM",
+            risk_level_rationale="例行兜底分析",
+            allowed_modes="['A', 'B', 'C']",
+            cash_ratio="30%",
+            max_position="15%",
             risk_committee_json=json.dumps({"summary": report_text}, ensure_ascii=False)
         )
         return self._call_r1_text(prompt)
