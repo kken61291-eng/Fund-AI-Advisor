@@ -85,12 +85,13 @@ TREND_KEYWORDS = {
         }
     },
     
-    # --- B轨：反转组 (带赔率计算) ---
+# --- B轨：反转组 (带赔率计算) ---
     "strategy_reversal": {
-        "keywords": ["超跌反弹", "估值修复", "情绪冰点", "错杀修复"],
+        "keywords": ["超跌反弹", "估值修复", "情绪冰点", "错杀修复", "闪崩错杀", "恐慌极值点", "带血筹码"],
         "quant_trigger": {
             "rsi": "<30",
-            "drawdown_20d": ">15%",
+            "drawdown_condition": "20日回撤>15% OR 5日急跌>7%",
+            "volume_condition": "极度缩量 OR 底部恐慌放量(较前日放大>1.5倍)",
             "fundamental_intact": True,
             "upside_space": ">downside_risk*2",
             "mandatory": "市场水位任意"
@@ -316,7 +317,9 @@ TACTICAL_IC_PROMPT = """
 - 抛弃绝对的分数崇拜，核心看“资金态度”：必须观察到“止跌抗跌”或“温和放量”等资金收集迹象。
 - 拒绝左侧飞刀：如果是无底线的缩量阴跌，即使基本面有改善传闻，也必须拒绝。
 - Mode A条件: trend_score>80 AND rsi 40-70 AND volume_vs_ma20>1.2 AND 水位非HIGH
-- Mode B条件: rsi<30 AND drawdown_20d>15% AND volume_percentile<20
+- Mode B条件 (满足其一即可放行):
+  ① 缓跌冰点: rsi<30 AND drawdown_20d>15% AND 极度缩量 (耐心杀估值)
+  ② 恐慌极值(闪崩错杀): 5日涨幅 < -7% AND rsi<20 AND 底部放量(成交量放大1.5倍以上)或出现长下影线 (恐慌盘涌出且有承接)
 - 默认立场: 若无明确资金配合，坚决支持D轨防御。
 
 🚀 CGO (赔率与逻辑狙击手):
