@@ -312,32 +312,32 @@ TACTICAL_IC_PROMPT = """
 
 【三方博弈 (带强制边界)】
 
-📊 Technical (概率守门员):
-- HIGH水位禁令: 严禁提议Mode A，即使trend_score=100。
+📊 Technical (盘面资金侦探):
+- 抛弃绝对的分数崇拜，核心看“资金态度”：必须观察到“止跌抗跌”或“温和放量”等资金收集迹象。
+- 拒绝左侧飞刀：如果是无底线的缩量阴跌，即使基本面有改善传闻，也必须拒绝。
 - Mode A条件: trend_score>80 AND rsi 40-70 AND volume_vs_ma20>1.2 AND 水位非HIGH
 - Mode B条件: rsi<30 AND drawdown_20d>15% AND volume_percentile<20
-- 默认立场: 若不符合任何模式，支持D轨防御
+- 默认立场: 若无明确资金配合，坚决支持D轨防御。
 
-🚀 CGO (赔率狙击手):
-- 反强行关联(Anti-Hallucination)禁令: 提取的事件必须与【{fund_name}】的底层产业有【直接、排他且明确】的因果逻辑！严禁将宽泛宏观事件（如局部战争、美联储降息、重要会议）强行套用于毫无直接关系的板块（如白酒、旅游、传媒）。若无直接产业关联，必须判定为“无有效事件”，立即放弃 C 轨！
-- HIGH水位禁令: Mode C仅允许TIER_S事件+days_to_event<=3+recent_gain<10%，否则转向B或放弃。
+🚀 CGO (赔率与逻辑狙击手):
+- 🛑 反幻觉(Anti-Hallucination)死线: 提取的事件必须与【{fund_name}】的底层产业有【直接、独占且极具爆发力】的因果逻辑！严禁将宽泛宏观事件（如局部冲突、降息）生搬硬套给白酒、旅游、传媒等弱相关行业。
+- 拒绝凭空意淫: 若今日新闻无特定针对该行业的重大事件，必须坦诚“缺乏催化剂”，直接放弃C轨。
 - 赔率公式: upside_space = |历史压力位-当前价|, downside_risk = |当前价-支撑位|
-- 有效赔率: upside_space / downside_risk > 2.0
+- 有效赔率: upside_space / downside_risk > 1.5
 - 时间衰减: 使用{decay_func}计算，weight<0.3时事件失效
-- 事件抢跑: recent_gain>15%时，C轨自动降级
 
-🛡️ CRO (先制风控):
+🛡️ CRO (致命瑕疵终结者):
 - 先制否决权: 检测到{fundamental_risk}关键词→立即REJECT，终止讨论。
-- HIGH水位职责: 对所有非D轨提案，必须量化:
-  - 假设打破情景(如地缘缓和)下的最大回撤
-  - 流动性折扣(HIGH波动率下成交价劣化估计)
-  - 硬止损位(技术位或-5%，取更严格者)
+- 孤证不立与挑刺法则: 你的唯一任务是寻找“致命瑕疵（Fatal Flaw）”：
+  1. 有技术无逻辑: 技术面极佳但无基本面/新闻催化，视为“无源之水、主力骗线”，一票否决。
+  2. 有逻辑无技术: 新闻重磅但盘面缩量阴跌毫无资金介入，视为“市场不买单”，一票否决。
+- HIGH水位职责: 必须量化最大回撤估计、流动性折扣，并给出硬止损位。
 
 【主席裁决流程】
-1. 约束检查: 若proposed_mode in {forbidden_modes}→直接否决
-2. 可用轨道择优: 在{allowed_modes}中选confidence最高者
+1. 交叉验证 (Cross-validation): 只有当CGO提出无可挑剔的产业逻辑，且Technical确认盘面资金（趋势或量能）已配合共振时，才允许放行A/B/C轨。
+2. 默认防守: 只要证据链缺一环，或CRO找到任何“致命瑕疵”，必须果断打入D轨(HOLD)。
 3. 仓位预分配: A轨15%→{max_position}, B轨10%→{max_position}, C轨12%→{max_position}, D轨0%
-4. 关键假设声明: 必须明确"该提案成立的前提条件"
+4. 关键假设声明: 必须明确"本交易成立的证据链核心前提"
 5. 假设打破应对: 前提打破时的无条件清仓逻辑
 
 【输出格式 - 严格JSON】
@@ -368,6 +368,7 @@ TACTICAL_IC_PROMPT = """
         "CRO": {{
             "stance": "支持/反对某模式",
             "tail_risk_scenario": "假设打破情景",
+            "fatal_flaw_search": "拿着放大镜寻找本交易的致命瑕疵（如孤证、蹭热点、市场不买账等）",
             "max_drawdown_estimate": "X%",
             "liquidity_discount": "Y%",
             "hard_stop": "具体止损位"
