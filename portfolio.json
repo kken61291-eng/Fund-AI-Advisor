@@ -176,10 +176,17 @@
   },
   "512660": {
     "name": "军工ETF",
-    "shares": 0,
-    "cost": 0.0,
-    "held_days": 0,
-    "history": []
+    "shares": 1004.0160642570281,
+    "cost": 1.494,
+    "held_days": 1,
+    "history": [
+      {
+        "date": "2026-03-04",
+        "price": 1.494,
+        "s": "B",
+        "amt": 1500
+      }
+    ]
   },
   "159697": {
     "name": "油气ETF",
