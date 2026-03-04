@@ -351,6 +351,11 @@ def main():
             "ai_full": ai_full_adapted
         })
 
+    # ===================================================
+    # [新增排序] 按模式 A/B/C/D 依次下排，符合阅读习惯
+    # ===================================================
+    final_results.sort(key=lambda x: x['ai_full']['strategy_meta'].get('mode', 'D'))
+
     cio_html = ""
     if analyst:
         logger.info("🧠 正在生成 CIO 战略定调 (基于风控报告)...")
