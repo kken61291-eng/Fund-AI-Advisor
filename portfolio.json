@@ -169,16 +169,23 @@
   },
   "518880": {
     "name": "黄金ETF",
-    "shares": 0,
-    "cost": 0.0,
-    "held_days": 0,
-    "history": []
+    "shares": 136.66180758017492,
+    "cost": 10.976,
+    "held_days": 1,
+    "history": [
+      {
+        "date": "2026-03-04",
+        "price": 10.976,
+        "s": "B",
+        "amt": 1500
+      }
+    ]
   },
   "512660": {
     "name": "军工ETF",
     "shares": 2008.0321285140562,
     "cost": 1.494,
-    "held_days": 3,
+    "held_days": 4,
     "history": [
       {
         "date": "2026-03-04",
