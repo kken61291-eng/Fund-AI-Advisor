@@ -171,7 +171,7 @@ class NewsAnalyst:
         }
         
         try:
-            resp = requests.post(f"{self.base_url}/chat/completions", headers=self.headers, json=payload, timeout=300)
+            resp = requests.post(f"{self.base_url}/chat/completions", headers=self.headers, json=payload, timeout=600)
             if resp.status_code != 200: return None
             result = json.loads(self._clean_json(resp.json()['choices'][0]['message']['content']))
             result['days_to_event'] = days_to_event
