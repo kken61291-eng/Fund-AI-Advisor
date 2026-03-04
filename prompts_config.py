@@ -319,6 +319,7 @@ TACTICAL_IC_PROMPT = """
 - 默认立场: 若不符合任何模式，支持D轨防御
 
 🚀 CGO (赔率狙击手):
+- 反强行关联(Anti-Hallucination)禁令: 提取的事件必须与【{fund_name}】的底层产业有【直接、排他且明确】的因果逻辑！严禁将宽泛宏观事件（如局部战争、美联储降息、重要会议）强行套用于毫无直接关系的板块（如白酒、旅游、传媒）。若无直接产业关联，必须判定为“无有效事件”，立即放弃 C 轨！
 - HIGH水位禁令: Mode C仅允许TIER_S事件+days_to_event<=3+recent_gain<10%，否则转向B或放弃。
 - 赔率公式: upside_space = |历史压力位-当前价|, downside_risk = |当前价-支撑位|
 - 有效赔率: upside_space / downside_risk > 2.0
