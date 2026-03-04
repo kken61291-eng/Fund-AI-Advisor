@@ -4,6 +4,7 @@ import threading
 import time
 import random
 import json
+import concurrent.futures  # [新增] 引入多线程并发库
 from datetime import datetime
 
 from data_fetcher import DataFetcher
@@ -103,7 +104,8 @@ def process_phase1_proposal(fund, fetcher, tracker, val_engine, analyst, market_
     """
     [Phase 1] 战术层提案收集
     """
-    time.sleep(random.uniform(2.0, 4.0))
+    # 增加一点随机延时，防止多线程同时发起请求时撞倒 API 并发限制
+    time.sleep(random.uniform(1.0, 3.0))
     
     fund_name = fund['name']; fund_code = fund['code']
     logger.info(f"🔍 [IC初审] 分析标的: {fund_name} ({fund_code})")
@@ -203,24 +205,39 @@ def main():
     # ===================================================
     # Phase 1: IC 战术投委会海选 (Proposal Collection)
     # ===================================================
-    logger.info("⚔️ [Phase 1] 启动 IC 战术投委会海选...")
+    logger.info("⚔️ [Phase 1] 启动 IC 战术投委会海选 (多线程并发处理)...")
     proposals = []
     candidates_for_veto = [] 
     
-    for fund in funds:
-        p = process_phase1_proposal(fund, fetcher, tracker, val_engine, analyst, market_context)
-        if p:
-            proposals.append(p)
-            if 'EXECUTE' in p['decision'] and 'PROPOSE' in p['decision']:
-                verdict = p['ic_res'].get('chairman_verdict', {})
-                candidates_for_veto.append({
-                    "code": p['code'],
-                    "name": p['name'],
-                    "mode": verdict.get('mode_selected', 'UNKNOWN'),
-                    "reason": verdict.get('logic_weighting', '无'),
-                    "key_assumption": verdict.get('key_assumption', ''),
-                    "tech_score": p['tech']['quant_score']
-                })
+    # [修改点] 开启多线程处理
+    MAX_WORKERS = 5 # 默认 5 个并发，兼顾速度与防止 API 触发 429 限流
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # 将所有的 fund 提交给线程池
+        future_to_fund = {
+            executor.submit(process_phase1_proposal, fund, fetcher, tracker, val_engine, analyst, market_context): fund
+            for fund in funds
+        }
+        
+        # 收集执行结果
+        for future in concurrent.futures.as_completed(future_to_fund):
+            fund = future_to_fund[future]
+            try:
+                p = future.result()
+                if p:
+                    proposals.append(p)
+                    if 'EXECUTE' in p['decision'] and 'PROPOSE' in p['decision']:
+                        verdict = p['ic_res'].get('chairman_verdict', {})
+                        candidates_for_veto.append({
+                            "code": p['code'],
+                            "name": p['name'],
+                            "mode": verdict.get('mode_selected', 'UNKNOWN'),
+                            "reason": verdict.get('logic_weighting', '无'),
+                            "key_assumption": verdict.get('key_assumption', ''),
+                            "tech_score": p['tech']['quant_score']
+                        })
+            except Exception as e:
+                logger.error(f"处理标的 {fund.get('name', 'Unknown')} 时发生多线程异常: {e}")
 
     # ===================================================
     # Phase 2: 风控委员会终审 (Risk Committee Veto)
