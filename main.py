@@ -359,10 +359,21 @@ def main():
     cio_html = ""
     if analyst:
         logger.info("🧠 正在生成 CIO 战略定调 (基于风控报告)...")
-        cio_html = analyst.generate_cio_strategy(
-            datetime.now().strftime("%Y-%m-%d"), 
-            risk_report_raw if 'risk_report_raw' in locals() else risk_report
-        )
+        try:
+            raw_cio = analyst.generate_cio_strategy(
+                datetime.now().strftime("%Y-%m-%d"), 
+                risk_report_raw if 'risk_report_raw' in locals() else risk_report
+            )
+            if raw_cio:
+                # 兼容性修复：剔除可能存在的大模型 Markdown 代码块标记，防止 json 解析失败
+                raw_cio = raw_cio.replace('```json', '').replace('```', '').strip()
+                cio_html = raw_cio
+            else:
+                logger.warning("CIO 战略定调返回为空，启用默认安全结构。")
+                cio_html = "{}"
+        except Exception as e:
+            logger.error(f"CIO 战略生成请求异常: {e}")
+            cio_html = "{}"
         
     html = render_html_report_v19(all_news_seen, final_results, cio_html, "") 
     
