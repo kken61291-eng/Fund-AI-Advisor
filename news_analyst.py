@@ -23,7 +23,7 @@ class NewsAnalyst:
         self.base_url = os.getenv("LLM_BASE_URL")
         
         # 🟢 完全使用 R1 模型
-        self.model_tactical = "Pro/deepseek-ai/DeepSeek-V3.2"      
+        self.model_tactical = "Pro/deepseek-ai/DeepSeek-V3.2"       
         self.model_strategic = "Pro/deepseek-ai/DeepSeek-R1"    
 
         self.headers = {
@@ -267,9 +267,11 @@ class NewsAnalyst:
             "temperature": 0.3
         }
         try:
-            resp = requests.post(f"{self.base_url}/chat/completions", headers=self.headers, json=payload, timeout=180)
+            # 🟢 [关键修复 2] CIO 定调强制延长 timeout 到 600 秒，保证 R1 能思考完
+            resp = requests.post(f"{self.base_url}/chat/completions", headers=self.headers, json=payload, timeout=600)
             content = resp.json()['choices'][0]['message']['content']
-            # 清理 HTML 输出中的 think 标签（如果混入的话）
-            content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
-            return content.replace("```html", "").replace("```", "").strip()
-        except: return "<p>分析生成中...</p>"
+            # 🟢 使用统一的 _clean_json，确保返回的一定是干净合法的 JSON 字符串
+            return self._clean_json(content)
+        except Exception as e:
+            logger.error(f"CIO API 调用异常: {e}")
+            return "{}"
