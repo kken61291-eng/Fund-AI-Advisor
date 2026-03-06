@@ -125,6 +125,37 @@ class NewsAnalyst:
             return "{}"
         except: return "{}"
 
+    # 🟢 [新增核心功能] 专门处理大模型思考超时的流式请求方法
+    def _safe_post_stream(self, payload, timeout=600):
+        payload['stream'] = True
+        full_content = ""
+        
+        resp = requests.post(f"{self.base_url}/chat/completions", headers=self.headers, json=payload, stream=True, timeout=timeout)
+        
+        if resp.status_code != 200:
+            raise Exception(f"HTTP Error {resp.status_code}: {resp.text}")
+            
+        for line in resp.iter_lines():
+            if line:
+                line_str = line.decode('utf-8').strip()
+                if line_str.startswith("data: "):
+                    data_str = line_str[6:]
+                    if data_str == "[DONE]": 
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        if "choices" in chunk and len(chunk["choices"]) > 0:
+                            delta = chunk["choices"][0].get("delta", {})
+                            if "content" in delta and delta["content"]:
+                                full_content += delta["content"]
+                    except json.JSONDecodeError:
+                        continue
+                        
+        if not full_content:
+            raise Exception("API 返回流为空")
+            
+        return full_content
+
     @retry(retries=1, delay=2)
     def analyze_fund_tactical_v6(self, fund_name, tech, macro_data, news_text, risk, strategy_type="core"):
         trend_score = tech.get('quant_score', 0)
@@ -171,9 +202,9 @@ class NewsAnalyst:
         }
         
         try:
-            resp = requests.post(f"{self.base_url}/chat/completions", headers=self.headers, json=payload, timeout=600)
-            if resp.status_code != 200: return None
-            result = json.loads(self._clean_json(resp.json()['choices'][0]['message']['content']))
+            # 🟢 加入流式处理防断连
+            raw_text = self._safe_post_stream(payload, timeout=600)
+            result = json.loads(self._clean_json(raw_text))
             result['days_to_event'] = days_to_event
             return result
         except Exception as e:
@@ -203,13 +234,13 @@ class NewsAnalyst:
             "model": self.model_strategic, 
             "messages": [{"role": "user", "content": prompt}], 
             "temperature": 0.2, 
-            # 🟢 [核心修复] 同样给够 R1 思考的 Token 空间
+            # 🟢 同样给够 R1 思考的 Token 空间
             "max_tokens": 8000
         }
         
         try:
-            resp = requests.post(f"{self.base_url}/chat/completions", headers=self.headers, json=payload, timeout=300)
-            raw_text = resp.json()['choices'][0]['message']['content']
+            # 🟢 加入流式处理防断连，超时拉长到 600 秒
+            raw_text = self._safe_post_stream(payload, timeout=600)
             return json.loads(self._clean_json(raw_text))
         except Exception as e:
             logger.error(f"Risk Veto Failed: {e}")
@@ -267,10 +298,11 @@ class NewsAnalyst:
             "temperature": 0.3
         }
         try:
-            # 🟢 [关键修复 2] CIO 定调强制延长 timeout 到 600 秒，保证 R1 能思考完
-            resp = requests.post(f"{self.base_url}/chat/completions", headers=self.headers, json=payload, timeout=600)
-            content = resp.json()['choices'][0]['message']['content']
-            # 🟢 使用统一的 _clean_json，确保返回的一定是干净合法的 JSON 字符串
+            # 🟢 加入流式处理防断连
+            raw_text = self._safe_post_stream(payload, timeout=600)
+            # 清理 HTML 输出中的 think 标签（如果混入的话）
+            content = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL)
+            # 🟢 彻底解决前端 <p> 标签报错，强行确保返回合法 JSON 结构
             return self._clean_json(content)
         except Exception as e:
             logger.error(f"CIO API 调用异常: {e}")
