@@ -67,6 +67,9 @@ jobs:
         if [[ -n $(git status --porcelain portfolio.json) ]]; then
           git add portfolio.json
           git commit -m "📈 Auto-update portfolio ledger [skip ci]"
+          
+          git checkout -- .
+          git clean -fd
           # 使用 rebase 避免合并冲突
           git pull --rebase origin main
           git push
