@@ -125,8 +125,10 @@ class NewsAnalyst:
             return "{}"
         except: return "{}"
 
-    # 🟢 [新增核心功能] 专门处理大模型思考超时的流式请求方法
     def _safe_post_stream(self, payload, timeout=600):
+        """
+        🟢 [防御断连核心] 使用流式接收(Stream)绕过服务器 300 秒网关静默超时。
+        """
         payload['stream'] = True
         full_content = ""
         
@@ -135,6 +137,7 @@ class NewsAnalyst:
         if resp.status_code != 200:
             raise Exception(f"HTTP Error {resp.status_code}: {resp.text}")
             
+        # 逐行读取流数据，只要有数据流动，网关就不会断开 TCP 连接
         for line in resp.iter_lines():
             if line:
                 line_str = line.decode('utf-8').strip()
@@ -143,7 +146,8 @@ class NewsAnalyst:
                     if data_str == "[DONE]": 
                         break
                     try:
-                        chunk = json.loads(data_str)
+                        # stream 流数据往往不包含全量 JSON，这不影响，只提取 delta
+                        chunk = json.loads(data_str, strict=False)
                         if "choices" in chunk and len(chunk["choices"]) > 0:
                             delta = chunk["choices"][0].get("delta", {})
                             if "content" in delta and delta["content"]:
@@ -196,7 +200,6 @@ class NewsAnalyst:
             "model": self.model_tactical, 
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.4,
-            # 🟢 [核心修复] R1的 <think> 会消耗大量 Token，必须给够上限，防止 JSON 被截断
             "max_tokens": 8000, 
             "response_format": {"type": "json_object"}
         }
@@ -204,7 +207,8 @@ class NewsAnalyst:
         try:
             # 🟢 加入流式处理防断连
             raw_text = self._safe_post_stream(payload, timeout=600)
-            result = json.loads(self._clean_json(raw_text))
+            # 🟢 终极防崩溃：strict=False 允许大模型在文本里输入原生换行符和制表符
+            result = json.loads(self._clean_json(raw_text), strict=False)
             result['days_to_event'] = days_to_event
             return result
         except Exception as e:
@@ -234,14 +238,14 @@ class NewsAnalyst:
             "model": self.model_strategic, 
             "messages": [{"role": "user", "content": prompt}], 
             "temperature": 0.2, 
-            # 🟢 同样给够 R1 思考的 Token 空间
             "max_tokens": 8000
         }
         
         try:
-            # 🟢 加入流式处理防断连，超时拉长到 600 秒
+            # 🟢 加入流式处理防断连
             raw_text = self._safe_post_stream(payload, timeout=600)
-            return json.loads(self._clean_json(raw_text))
+            # 🟢 终极防崩溃：strict=False 允许解析控制符
+            return json.loads(self._clean_json(raw_text), strict=False)
         except Exception as e:
             logger.error(f"Risk Veto Failed: {e}")
             return {"approved_list": [], "rejected_log": [{"code": "ALL", "reason": "风控服务超时"}], "risk_summary": "System Error"}
@@ -293,17 +297,20 @@ class NewsAnalyst:
         payload = {
             "model": self.model_strategic, 
             "messages": [{"role": "user", "content": prompt}], 
-            # 🟢 [核心修复] 给足 Token
             "max_tokens": 8000, 
             "temperature": 0.3
         }
         try:
             # 🟢 加入流式处理防断连
             raw_text = self._safe_post_stream(payload, timeout=600)
-            # 清理 HTML 输出中的 think 标签（如果混入的话）
-            content = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL)
-            # 🟢 彻底解决前端 <p> 标签报错，强行确保返回合法 JSON 结构
-            return self._clean_json(content)
+            clean_str = self._clean_json(raw_text)
+            try:
+                # 🟢 使用 strict=False 宽容解析大模型可能带有的未转义换行符
+                # 然后重新使用标准 json.dumps 格式化，彻底保护下游的 ui_renderer.py 绝不报错！
+                parsed = json.loads(clean_str, strict=False)
+                return json.dumps(parsed, ensure_ascii=False)
+            except Exception:
+                return clean_str
         except Exception as e:
             logger.error(f"CIO API 调用异常: {e}")
             return "{}"
