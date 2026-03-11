@@ -182,7 +182,7 @@ class NewsAnalyst:
                 recent_gain=tech.get('recent_gain', 0),
                 drawdown_20d=tech.get('drawdown_20d', 5), # 降级默认值
                 volume_percentile=tech.get('volume_percentile', 50),
-                net_flow=f"{macro_data.get('net_flow', 0)}亿",
+                net_flow=f"{macro_data.get('net_flow', 0)}",
                 leader_status=macro_data.get('leader_status', 'UNKNOWN'),
                 sector_breadth=tech.get('sector_breadth', 50),
                 days_to_event=days_to_event,
