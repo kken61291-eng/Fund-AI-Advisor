@@ -126,6 +126,39 @@ class TechnicalAnalyzer:
                 ma_alignment = "MIXED"
             indicators['ma_alignment'] = ma_alignment
 
+            # --- 4. 风险收益评估指标 (新增部分) ---
+            
+            # 使用60日最高点作为理论目标价
+            target_price = high.rolling(window=60, min_periods=1).max().iloc[-1]
+            # 使用20日最低点作为理论止损价
+            stop_loss = low.rolling(window=20, min_periods=1).min().iloc[-1]
+
+            # 边缘情况处理：如果当前价格已经突破60日新高，利用ATR向外延展2倍作为新目标
+            if target_price <= current_price:
+                target_price = current_price + (atr * 2)
+
+            # 边缘情况处理：如果当前价格已经跌破20日新低，利用ATR向下延展2倍作为极限止损
+            if stop_loss >= current_price:
+                stop_loss = current_price - (atr * 2)
+
+            # 计算向上空间(%)和向下风险(%)
+            upside_space = ((target_price - current_price) / current_price) * 100
+            downside_risk = ((current_price - stop_loss) / current_price) * 100
+
+            # 计算盈亏比 (避免除以0的情况)
+            if downside_risk > 0:
+                ratio = upside_space / downside_risk
+            else:
+                ratio = 999.0  # 代表技术面测算的下行风险极小
+
+            indicators['risk_reward'] = {
+                'target_price': round(target_price, 3),
+                'stop_loss': round(stop_loss, 3),
+                'upside_space_pct': round(upside_space, 2),
+                'downside_risk_pct': round(downside_risk, 2),
+                'ratio': round(ratio, 2)
+            }
+
             return indicators
 
         except Exception as e:
@@ -251,5 +284,12 @@ class TechnicalAnalyzer:
             'macd': {'trend': 'FLAT', 'divergence': 'NONE', 'hist': 0},
             'volume_analysis': {'vol_ratio': 1.0, 'status': 'NORMAL'},
             'ma_alignment': 'MIXED',
-            'moving_averages': {'EMA5': 0, 'MA20': 0, 'MA60': 0}
+            'moving_averages': {'EMA5': 0, 'MA20': 0, 'MA60': 0},
+            'risk_reward': { # 新增默认兜底数据
+                'target_price': 0.0,
+                'stop_loss': 0.0,
+                'upside_space_pct': 0.0,
+                'downside_risk_pct': 0.0,
+                'ratio': 0.0
+            }
         }
