@@ -32,8 +32,8 @@ def load_config():
 
 def calculate_position_v19(tech, mode, final_decision, val_mult, val_desc, base_amt, max_daily, pos, strategy_type, fund_name):
     """
-    V19.6.5 绝对服从型资金计算算法 (根治神经割裂)
-    彻底抛弃纯依靠技术面打分的买卖映射，严格按 A/B/C/D 轨和风控决议执行！
+    V19.7 轨道绝对服从版 (知行合一)
+    核心逻辑：轨道 (A/B/C/D) 决定一切！ABC就是买入，D就是卖出/清仓！
     """
     base_score = tech.get('quant_score', 50)
     
@@ -42,29 +42,21 @@ def calculate_position_v19(tech, mode, final_decision, val_mult, val_desc, base_
     is_sell = False
     label = "观望"
     
-    # 1. 核心修复：严格遵循投委会指令决定大方向，禁止技术分越权
-    if final_decision == "EXECUTE":
-        # 批准进攻 (A/B/C轨)
+    # 1. 轨道绝对主导 (Track Dictates Action)
+    if mode in ['A', 'B', 'C']:
+        # 进攻轨 -> 准备买入
         if mode == 'A': 
             tactical_mult = 1.5; reasons.append("🚀 A轨:趋势跟随")
         elif mode == 'B': 
             tactical_mult = 1.0; reasons.append("🛡️ B轨:超跌反转")
         elif mode == 'C': 
             tactical_mult = 1.2; reasons.append("⚡ C轨:事件驱动")
+    else:
+        # D轨 -> 防御/垃圾时间 -> 强制卖出或观望
+        if pos['shares'] > 0:
+            tactical_mult = -1.0; reasons.append("🗑️ D轨:强制清仓防守")
         else:
-            tactical_mult = 1.0; reasons.append("✅ 投委会批准")
-            
-    elif final_decision == "REJECT":
-        # 风控否决
-        tactical_mult = -1.0 if pos['shares'] > 0 else 0.0
-        reasons.append("❌ 风控一票否决")
-        
-    else: # HOLD, HOLD_CASH, 或 D轨
-        # D轨防守时间，绝不主动买入。若技术面破位(分数<30)且持有仓位，则减仓。
-        if base_score < 30 and pos['shares'] > 0:
-            tactical_mult = -1.0; reasons.append("🗑️ D轨:技术破位止损")
-        else:
-            tactical_mult = 0.0; reasons.append("☕ D轨:强制防守观望")
+            tactical_mult = 0.0; reasons.append("☕ D轨:空仓观望")
 
     # 2. 估值战略修正 (防追高，防割地板)
     if tactical_mult > 0: # 准备买入时
@@ -93,7 +85,7 @@ def calculate_position_v19(tech, mode, final_decision, val_mult, val_desc, base_
         sell_val = pos['shares'] * tech.get('price', 0) * min(abs(tactical_mult), 1.0)
         label = "卖出"
 
-    if final_decision in ["HOLD_CASH", "HOLD", "REJECT"] and pos['shares'] == 0: 
+    if mode == 'D' and pos['shares'] == 0: 
         label = "空仓"
 
     tech['quant_reasons'] = reasons
@@ -303,6 +295,15 @@ def main():
         elif final_decision == "HOLD_CASH": calc_decision = "HOLD_CASH"
 
         mode = verdict.get('mode_selected', 'D')
+        
+        # 🟢 [核心重构] 知行合一：强制绑定“决策”与“轨道”！
+        # 只要没被批准买入(不是EXECUTE)，无论大模型怎么吹，强制剥夺ABC轨称号，打入D轨！
+        # 配合底层 calculate_position_v19，D轨一定会触发卖出/空仓逻辑。
+        if calc_decision != "EXECUTE":
+            if mode in ['A', 'B', 'C']:
+                verdict['logic_weighting'] = f"【系统降级: 原{mode}轨被否决，归入D轨防守】 " + verdict.get('logic_weighting', '')
+            mode = 'D'
+            verdict['mode_selected'] = 'D' # 彻底修改原始状态，确保UI渲染时只显示D轨
         
         amt, lbl, is_sell, s_val = calculate_position_v19(
             p['tech'], mode, calc_decision, p['val_mult'], p['val_desc'],
