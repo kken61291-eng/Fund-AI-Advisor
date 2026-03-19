@@ -85,7 +85,7 @@ TREND_KEYWORDS = {
         }
     },
     
-# --- B轨：反转组 (带赔率计算) ---
+    # --- B轨：反转组 (带赔率计算) ---
     "strategy_reversal": {
         "keywords": ["超跌反弹", "估值修复", "情绪冰点", "错杀修复", "闪崩错杀", "恐慌极值点", "带血筹码"],
         "quant_trigger": {
@@ -307,6 +307,7 @@ TACTICAL_IC_PROMPT = """
 【标的】{fund_name} ({fund_code})
 【输入数据】
 - 技术面: 评分={trend_score}/100 | RSI={rsi} | 波动率={volatility_status} | 5日涨幅={recent_gain}% | 20日回撤={drawdown_20d}% | 成交量分位={volume_percentile}%
+- 风险收益: 系统测算向上空间={upside_space:.2f}% | 极限向下风险={downside_risk:.2f}% | 综合盈亏比={ratio:.2f}
 - 资金面: 净流入={net_flow}亿 | 龙头状态={leader_status} | 板块内上涨家数比={sector_breadth}%
 - 事件面: 距关键事件{days_to_event}天 | 级别={event_tier} | 衰减后权重={decayed_weight:.2f}
 - 舆情面: {news_content}
@@ -325,8 +326,8 @@ TACTICAL_IC_PROMPT = """
 🚀 CGO (赔率与逻辑狙击手):
 - 🛑 反幻觉(Anti-Hallucination)死线: 提取的事件必须与【{fund_name}】的底层产业有【直接、独占且极具爆发力】的因果逻辑！严禁将宽泛宏观事件（如局部冲突、降息）生搬硬套给白酒、旅游、传媒等弱相关行业。
 - 拒绝凭空意淫: 若今日新闻无特定针对该行业的重大事件，必须坦诚“缺乏催化剂”，直接放弃C轨。
-- 赔率公式: upside_space = |历史压力位-当前价|, downside_risk = |当前价-支撑位|
-- 有效赔率: upside_space / downside_risk > 1.5
+- 赔率判决: 必须严格基于系统客观测算的数据（向上空间={upside_space:.2f}%，极限向下风险={downside_risk:.2f}%，盈亏比={ratio:.2f}）。严禁自行猜测空间！
+- 有效赔率: 只有当客观盈亏比({ratio:.2f}) > 1.5 且向上空间 > 5% 时才具备盈亏性价比，否则一律放弃！
 - 时间衰减: 使用{decay_func}计算，weight<0.3时事件失效
 
 🛡️ CRO (致命瑕疵终结者):
@@ -364,7 +365,7 @@ TACTICAL_IC_PROMPT = """
         }},
         "CGO": {{
             "stance": "支持/反对某模式",
-            "odds_calculation": "upside=X, downside=Y, ratio=Z",
+            "odds_calculation": "系统客观盈亏比为{ratio:.2f}(向上{upside_space:.2f}%)，判定...",
             "time_decay": "原始权重W，衰减后={decayed_weight:.2f}",
             "event_quality": "事件质量评估"
         }},
@@ -416,7 +417,6 @@ synergy = (sector_breadth × 0.4) + (correlation_with_leader × 30 × 0.3) + (fu
 upside% = min(历史压力位, 事件目标价) - 当前价
 downside% = 当前价 - max(技术支撑位, 硬止损位)
 r_r_ratio = upside% / |downside%|
-
 阈值: >2.0通过, 1.5-2.0降级(仓位降50%), <1.5否决
 
 ### 测试3: 拥挤度 (Crowdedness Index, 0-100)
