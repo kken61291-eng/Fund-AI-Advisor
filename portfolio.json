@@ -308,9 +308,9 @@
   },
   "159697": {
     "name": "油气ETF",
-    "shares": 0,
-    "cost": 0.0,
-    "held_days": 0,
+    "shares": 794.7019867549669,
+    "cost": 1.51,
+    "held_days": 1,
     "history": [
       {
         "date": "2026-03-12",
@@ -353,6 +353,12 @@
         "price": 1.496,
         "s": "S",
         "amt": -8467
+      },
+      {
+        "date": "2026-03-19",
+        "price": 1.51,
+        "s": "B",
+        "amt": 1200
       }
     ]
   },
@@ -408,7 +414,7 @@
     "name": "绿电ETF",
     "shares": 1209.6774193548388,
     "cost": 1.24,
-    "held_days": 4,
+    "held_days": 5,
     "history": [
       {
         "date": "2026-03-18",
@@ -512,7 +518,7 @@
     "name": "消费ETF",
     "shares": 2459.0163934426228,
     "cost": 0.793,
-    "held_days": 7,
+    "held_days": 8,
     "history": [
       {
         "date": "2026-03-17",
