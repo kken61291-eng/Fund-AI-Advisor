@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timedelta
 from utils import logger, retry, get_beijing_time
 
+# 【关键修改】移除了 RED_TEAM_AUDIT_PROMPT，防止 ImportError
 from prompts_config import (
     TACTICAL_IC_PROMPT, 
     STRATEGIC_CIO_REPORT_PROMPT, 
@@ -163,16 +164,17 @@ class NewsAnalyst:
     def analyze_fund_tactical_v6(self, fund_name, tech, macro_data, news_text, risk, strategy_type="core"):
         trend_score = tech.get('quant_score', 0)
         days_to_event, event_tier = self.extract_event_info(news_text)
-        
-        # 🟢 [新增] 提取风报比/盈亏比数据
+
+        # 🟢 [新增] 提取系统计算的风报比/盈亏比数据
         risk_reward = tech.get('risk_reward', {})
         upside_space = risk_reward.get('upside_space_pct', 0.0)
         downside_risk = risk_reward.get('downside_risk_pct', 0.0)
         ratio = risk_reward.get('ratio', 0.0)
 
         try:
+            # 【关键补齐】填补 v19.6.5 Prompt 必须的额外参数，防止 KeyError 崩溃
             prompt = TACTICAL_IC_PROMPT.format(
-                market_risk_level="MEDIUM", 
+                market_risk_level="MEDIUM", # 此处可升级为动态水位检测
                 allowed_modes="['A', 'B', 'C']",
                 forbidden_modes="[]",
                 max_position="15%",
@@ -184,10 +186,10 @@ class NewsAnalyst:
                 rsi=tech.get('rsi', 50),
                 volatility_status=tech.get('volatility_status', '-'),
                 recent_gain=tech.get('recent_gain', 0),
-                drawdown_20d=tech.get('drawdown_20d', 5), 
+                drawdown_20d=tech.get('drawdown_20d', 5), # 降级默认值
                 volume_percentile=tech.get('volume_percentile', 50),
                 
-                # 🟢 [新增] 注入风报比数据到 Prompt
+                # 🟢 [新增] 将测算好的风报比数据注入到 Prompt 供 CGO 裁决
                 upside_space=upside_space,
                 downside_risk=downside_risk,
                 ratio=ratio,
@@ -215,7 +217,9 @@ class NewsAnalyst:
         }
         
         try:
+            # 🟢 加入流式处理防断连
             raw_text = self._safe_post_stream(payload, timeout=600)
+            # 🟢 终极防崩溃：strict=False 允许大模型在文本里输入原生换行符和制表符
             result = json.loads(self._clean_json(raw_text), strict=False)
             result['days_to_event'] = days_to_event
             return result
@@ -230,6 +234,7 @@ class NewsAnalyst:
         candidates_str = json.dumps(candidates, indent=2, ensure_ascii=False)
         
         try:
+            # 【关键补齐】V19.6.5 风控测试矩阵必须的参数
             prompt = RISK_CONTROL_VETO_PROMPT.format(
                 market_risk_level="MEDIUM",
                 candidate_count=len(candidates),
@@ -249,7 +254,9 @@ class NewsAnalyst:
         }
         
         try:
+            # 🟢 加入流式处理防断连
             raw_text = self._safe_post_stream(payload, timeout=600)
+            # 🟢 终极防崩溃：strict=False 允许解析控制符
             return json.loads(self._clean_json(raw_text), strict=False)
         except Exception as e:
             logger.error(f"Risk Veto Failed: {e}")
@@ -258,6 +265,7 @@ class NewsAnalyst:
     @retry(retries=2, delay=5)
     def generate_cio_strategy(self, current_date, risk_report_json):
         try:
+            # 【关键补齐】V19.6.5 战略报告必须的参数
             prompt = STRATEGIC_CIO_REPORT_PROMPT.format(
                 current_date=current_date,
                 market_risk_level="MEDIUM",
@@ -273,12 +281,14 @@ class NewsAnalyst:
 
         return self._call_r1_text(prompt)
 
+    # --- 兼容性方法 (移除对 RED_TEAM_AUDIT_PROMPT 的依赖) ---
     @retry(retries=1, delay=2)
     def analyze_fund_v5(self, fund_name, tech, macro_data, news_text, risk, strategy_type="core"):
         return self.analyze_fund_tactical_v6(fund_name, tech, macro_data, news_text, risk, strategy_type)
 
     @retry(retries=2, delay=5)
     def review_report(self, report_text, macro_str):
+        # 兜底：使用 CIO 模板
         prompt = STRATEGIC_CIO_REPORT_PROMPT.format(
             current_date=datetime.now().strftime("%Y-%m-%d"), 
             market_risk_level="MEDIUM",
@@ -292,6 +302,7 @@ class NewsAnalyst:
 
     @retry(retries=2, delay=5)
     def advisor_review(self, report_text, macro_str):
+        # 不再使用 RED_TEAM_AUDIT_PROMPT，改为返回空字符串
         return ""
 
     def _call_r1_text(self, prompt):
@@ -302,9 +313,12 @@ class NewsAnalyst:
             "temperature": 0.3
         }
         try:
+            # 🟢 加入流式处理防断连
             raw_text = self._safe_post_stream(payload, timeout=600)
             clean_str = self._clean_json(raw_text)
             try:
+                # 🟢 使用 strict=False 宽容解析大模型可能带有的未转义换行符
+                # 然后重新使用标准 json.dumps 格式化，彻底保护下游的 ui_renderer.py 绝不报错！
                 parsed = json.loads(clean_str, strict=False)
                 return json.dumps(parsed, ensure_ascii=False)
             except Exception:
