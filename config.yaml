@@ -5,45 +5,31 @@ global:
 
 funds:
   # ==========================================
-  # 1. Scale & Liquidity (宽基/流动性) - 核心底仓
+  # 1. Scale & Liquidity (宽基/流动性) - 核心底仓 (精简提纯，只留高弹性与核心主升浪)
   # ==========================================
-  - name: "上证50ETF"
-    code: "510050"
-    strategy_type: "core"
-    index_name: "sh000016"
-    # [关键词] 覆盖超大盘权重与金融地产
-    sector_keyword: "上证50 核心资产 蓝筹股 贵州茅台 招商银行 中国平安 金融地产 大盘股 中字头 央企市值管理"
-
   - name: "沪深300ETF"
     code: "510300"
     strategy_type: "core"
     index_name: "sh000300"
-    # [关键词] 覆盖A股核心资产与宏观
+    # [关键词] 覆盖A股核心资产与宏观，吃足大盘涨势
     sector_keyword: "沪深300 A股 核心资产 北向资金 外资流向 GDP数据 PMI指数 白马股 行业龙头 股指期货 经济复苏"
-
-  - name: "中证500ETF"
-    code: "510500"
-    strategy_type: "core"
-    index_name: "sh000905"
-    # [关键词] 覆盖中盘成长与制造业
-    sector_keyword: "中证500 中盘股 细分龙头 专精特新 制造业 估值修复 IC合约 周期成长 工业利润 转型升级"
 
   - name: "中证1000ETF"
     code: "512100"
     strategy_type: "core"
     index_name: "sh000852"
-    # [关键词] 覆盖小盘活跃资金
+    # [关键词] 覆盖小盘活跃资金，高弹性
     sector_keyword: "中证1000 小盘股 活跃资金 量化交易 游资 专精特新 高弹性 波动率 IM合约 民营企业 壳资源"
 
   - name: "中证2000ETF"
     code: "563300"
     strategy_type: "core"
     index_name: "sh932000"
-    # [关键词] 覆盖微盘股与情绪博弈
+    # [关键词] 覆盖微盘股与极端情绪博弈
     sector_keyword: "中证2000 微盘股 极致小盘 游资炒作 连板股 借壳重组 活跃资金 垃圾股爆炒 量化策略 情绪博弈"
 
   # ==========================================
-  # 2. Growth & Tech (科技成长) - 卫星进攻
+  # 2. Growth & Tech (科技成长) - 卫星进攻 (自带高贝塔与情绪溢价)
   # ==========================================
   - name: "创业板ETF"
     code: "159915"
@@ -56,21 +42,21 @@ funds:
     code: "588000"
     strategy_type: "satellite"
     index_name: "sh000688"
-    # [关键词] 覆盖硬科技产业链
+    # [关键词] 覆盖硬科技产业链，极强爆发力
     sector_keyword: "科创板 硬科技 半导体 中芯国际 金山办公 寒武纪 专精特新 国产替代 芯片设计 科创做市"
 
   - name: "半导体ETF"
     code: "512480"
     strategy_type: "satellite"
     index_name: "sh000932"
-    # [关键词] 覆盖芯片全产业链与制裁
+    # [关键词] 覆盖芯片全产业链与制裁情绪
     sector_keyword: "半导体 芯片 集成电路 华为海思 大基金 光刻机 存储芯片 算力芯片 韦尔股份 北方华创 先进封装"
 
   - name: "纳指科技ETF"
     code: "159509"
     strategy_type: "satellite"
     index_name: "NDX"
-    # [关键词] 覆盖美股科技七巨头
+    # [关键词] 覆盖美股科技七巨头与AI狂热
     sector_keyword: "纳斯达克 美股 科技股 英伟达 Nvidia 苹果 微软 特斯拉 OpenAI 人工智能 降息预期 费城半导体"
 
   - name: "通信ETF"
@@ -87,7 +73,7 @@ funds:
     code: "512880"
     strategy_type: "satellite"
     index_name: "sh000987"
-    # [关键词] 覆盖牛市旗手与政策
+    # [关键词] 覆盖牛市旗手与政策情绪
     sector_keyword: "证券板块 券商 牛市旗手 中信证券 东方财富 印花税 市场成交量 降费 并购重组 资本市场改革"
 
   - name: "银行ETF"
@@ -101,21 +87,21 @@ funds:
     code: "510880"
     strategy_type: "dividend"
     index_name: "sh000922"
-    # [关键词] 覆盖红利防御逻辑
+    # [关键词] 覆盖红利防御逻辑与避险情绪
     sector_keyword: "中证红利 高股息 央企分红 市值管理 中特估 煤炭 交通运输 长江电力 防御策略 股息率"
 
   - name: "新能源ETF"
     code: "516160"
     strategy_type: "satellite"
     index_name: "sh000941"
-    # [关键词] 覆盖光伏风电储能
+    # [关键词] 覆盖光伏风电储能超跌反弹情绪
     sector_keyword: "新能源 光伏 隆基绿能 通威股份 风电 储能电池 碳中和 产能过剩 行业出海 硅料价格"
 
   - name: "机器人ETF"
     code: "562500"
     strategy_type: "satellite"
     index_name: "sh000685"
-    # [关键词] 覆盖人形机器人与智能制造
+    # [关键词] 覆盖人形机器人与前沿制造炒作
     sector_keyword: "人形机器人 特斯拉Optimus 减速器 汇川技术 埃斯顿 绿的谐波 传感器 智能制造 工业自动化 具身智能"
 
   # ==========================================
@@ -125,35 +111,35 @@ funds:
     code: "513500"
     strategy_type: "core"
     index_name: "SPX"
-    # [关键词] 覆盖美股宏观
+    # [关键词] 覆盖美股宏观大势
     sector_keyword: "标普500 美股 SPX 巴菲特 美国经济 非农数据 美联储 软着陆 伯克希尔 核心通胀率"
 
   - name: "日经225ETF"
     code: "159866"
     strategy_type: "satellite"
     index_name: "N225"
-    # [关键词] 覆盖日本市场
+    # [关键词] 覆盖日本市场情绪
     sector_keyword: "日经225 日本股市 巴菲特加仓 日元汇率 日本央行 丰田汽车 五大商社 宽松政策 亚洲股市 货币政策"
 
   - name: "恒生科技ETF"
     code: "513130"
     strategy_type: "satellite"
     index_name: "HSTECH"
-    # [关键词] 覆盖港股互联网巨头
+    # [关键词] 覆盖港股互联网巨头弹性
     sector_keyword: "恒生科技 港股 腾讯控股 阿里巴巴 美团 小米集团 南向资金 互联网巨头 平台经济 估值洼地"
 
   - name: "恒生红利ETF"
     code: "159726"
     strategy_type: "dividend"
     index_name: "HSCDI"
-    # [关键词] 覆盖港股高分红
+    # [关键词] 覆盖港股高分红避险
     sector_keyword: "港股红利 高股息 中国移动 中国海油 内银股 南向资金 AH股溢价 避险资产 现金流 低估值"
 
   - name: "游戏ETF"
     code: "159869"
     strategy_type: "satellite"
     index_name: "sz399006"
-    # [关键词] 覆盖AI应用落地与出海
+    # [关键词] 覆盖AI应用落地与传媒爆炒情绪
     sector_keyword: "游戏板块 腾讯游戏 网易游戏 AI游戏 版号发放 出海收入 恺英网络 三七互娱 吉比特 元宇宙应用"
 
   # ==========================================
@@ -163,21 +149,21 @@ funds:
     code: "518880"
     strategy_type: "hedge"
     index_name: "AU9999"
-    # [关键词] 覆盖金价影响因子
+    # [关键词] 覆盖金价情绪因子
     sector_keyword: "黄金价格 现货黄金 伦敦金 避险资产 央行购金 美联储降息 地缘政治 通胀预期 俄乌局势 货币贬值"
 
   - name: "30年国债ETF"
     code: "511090"
     strategy_type: "hedge"
     index_name: "sh000012"
-    # [关键词] 覆盖利率债逻辑
+    # [关键词] 覆盖利率债与流动性恐慌/宽松
     sector_keyword: "国债期货 30年国债 债券收益率 央行降息 降准 货币政策 避险资产 利率债 债券牛市 长期国债"
 
   - name: "有色金属ETF"
     code: "512400"
     strategy_type: "satellite"
     index_name: "sh000819"
-    # [关键词] 覆盖资源周期
+    # [关键词] 覆盖资源周期炒作
     sector_keyword: "有色金属 铜价 铝 紫金矿业 锂矿 黄金 洛阳钼业 资源股 大宗商品 期货价格"
 
   - name: "豆粕ETF"
@@ -195,39 +181,53 @@ funds:
     sector_keyword: "能源化工 原油期货 甲醇 PTA 乙二醇 煤化工 原油价格 地缘政治 供给冲击 通胀对冲 OPEC"
 
   # ==========================================
-  # 6. Geopolitics & Resources (中东冲突/地缘博弈)
+  # 6. Geopolitics & Resources (地缘博弈/情绪挂钩)
   # ==========================================
   - name: "军工ETF"
     code: "512660"
     strategy_type: "satellite"
     index_name: "sh399967"
-    # [关键词] 覆盖中东冲突防御与军工装备
+    # [关键词] 覆盖地缘冲突防御与大国博弈情绪
     sector_keyword: "中东冲突 军工装备 地缘政治 航母 大飞机 商业航天 卫星导航 国防安全 军工企业 避险"
 
-  - name: "油气ETF"
-    code: "159697"
+  - name: "标普油气ETF"
+    code: "513350"
     strategy_type: "hedge"
-    index_name: "h11074"
-    # [关键词] 覆盖中东冲突带来的原油供给冲击
-    sector_keyword: "中东冲突 原油价格 三桶油 油气开采 能源安全 欧佩克 供给冲击 通胀 避险情绪 俄乌局势"
+    index_name: "SPSIOP"
+    # [关键词] 覆盖中东冲突、全球原油供给与美股油气弹性
+    sector_keyword: "标普油气 原油价格 XOP 美股油气 能源安全 欧佩克 供给冲击 通胀 避险情绪 俄乌局势 中东冲突"
 
   - name: "白银ETF"
     code: "159822"
     strategy_type: "hedge"
     index_name: "sz161226"
-    # [关键词] 覆盖地缘冲突避险与贵金属
+    # [关键词] 覆盖地缘冲突避险与高弹性贵金属
     sector_keyword: "中东冲突 白银 贵金属 避险资产 金银比 工业属性 货币超发 货币政策 现货白银 资源股"
 
   - name: "航运ETF"
     code: "159847"
     strategy_type: "satellite"
     index_name: "sh931555"
-    # [关键词] 覆盖红海危机与全球供应链
+    # [关键词] 覆盖红海危机、地缘卡脖子与全球运价情绪
     sector_keyword: "中东冲突 航运 港口 红海危机 运价上涨 供应链 集装箱 散货船 国际贸易 波罗的海干散货指数"
 
   # ==========================================
-  # 7. Hot Themes (同花顺热门/近期资金风口)
+  # 7. Hot Themes (近期资金风口/情绪极强放大器)
   # ==========================================
+  - name: "金融科技ETF"
+    code: "159851"
+    strategy_type: "satellite"
+    index_name: "sh930986"
+    # [关键词] 覆盖牛市先锋与散户入场情绪极强放大器
+    sector_keyword: "金融科技 互联网券商 同花顺 东方财富 牛市先锋 情绪博弈 活跃资金 弹性极强 散户入场 软件服务"
+
+  - name: "人工智能ETF"
+    code: "159819"
+    strategy_type: "satellite"
+    index_name: "sh931071"
+    # [关键词] 覆盖全球科技浪潮核心与游资主攻方向
+    sector_keyword: "人工智能 AI 大模型 算力 算法 AGI 情绪风口 科技革命 爆发力 算力租赁 产业趋势"
+
   - name: "消费电子ETF"
     code: "159732"
     strategy_type: "satellite"
@@ -239,28 +239,28 @@ funds:
     code: "159755"
     strategy_type: "satellite"
     index_name: "sz399976"
-    # [关键词] 覆盖固态电池与新技术迭代
+    # [关键词] 覆盖固态电池与新技术迭代炒作
     sector_keyword: "同花顺热门 固态电池 宁德时代 锂矿 动力电池 储能 新能源车 碳酸锂 续航里程 电池回收"
 
   - name: "传媒ETF"
     code: "512980"
     strategy_type: "satellite"
     index_name: "sh399971"
-    # [关键词] 覆盖AI多模态应用与谷子经济
+    # [关键词] 覆盖AI多模态应用与谷子经济情绪
     sector_keyword: "同花顺热门 AI应用 Sora概念 谷子经济 短剧游戏 影视院线 内容变现 知识产权 抖音概念 虚拟人"
 
   - name: "创新药ETF"
     code: "159992"
     strategy_type: "satellite"
     index_name: "sz399986"
-    # [关键词] 覆盖减肥药与医药出海
+    # [关键词] 覆盖减肥药与医药出海风口
     sector_keyword: "同花顺热门 创新药 减肥药 恒瑞医药 药明康德 CXO 临床试验 医保谈判 医药出海 生物技术"
 
   - name: "汽车ETF"
     code: "516110"
     strategy_type: "satellite"
     index_name: "sh931008"
-    # [关键词] 覆盖无人驾驶与飞行汽车
+    # [关键词] 覆盖无人驾驶与飞行经济热点
     sector_keyword: "同花顺热门 无人驾驶 飞行汽车 低空经济 汽车整车 智能网联 比亚迪 华为汽车 汽车出海 价格战"
 
   # ==========================================
@@ -322,22 +322,22 @@ funds:
     code: "512200"
     strategy_type: "satellite"
     index_name: "sh000952"
-    # [关键词] 覆盖化债与政策底
+    # [关键词] 覆盖化债与政策底博弈
     sector_keyword: "房地产 政策底 保交楼 城中村改造 降首付 存量房贷 保利发展 万科A 销售数据 地产链"
 
-  - name: "基建ETF"
-    code: "516950"
+  - name: "稀土ETF"
+    code: "159713"
     strategy_type: "satellite"
-    index_name: "sh930608"
-    # [关键词] 覆盖逆周期调节
-    sector_keyword: "基础建设 专项债 稳增长 逆周期调节 中国建筑 高铁轨交 建筑材料 水利工程 老旧小区改造 地方化债"
+    index_name: "sz399395"
+    # [关键词] 覆盖大国博弈与反制情绪
+    sector_keyword: "稀土 战略资源 稀土永磁 出口管制 贸易摩擦 国产替代 地缘反制 北方稀土 中国稀土 磁性材料"
 
   - name: "家电ETF"
     code: "159996"
     strategy_type: "satellite"
     index_name: "sh000927"
     # [关键词] 覆盖出海与以旧换新
-    sector_keyword: "家用电器 以旧换新 出海 美的集团 海尔智家 地产后周期 消费升级 白电 智能家居 铜价"
+    sector_keyword: "家用电器 以旧换新 出海 美巨大的集团 海尔智家 地产后周期 消费升级 白电 智能家居 铜价"
 
   - name: "农业ETF"
     code: "159825"
@@ -357,7 +357,7 @@ funds:
     code: "512690"
     strategy_type: "satellite"
     index_name: "sh399997"
-    # [关键词] 覆盖高端消费与批价
+    # [关键词] 覆盖高端消费与批价情绪
     sector_keyword: "白酒 泸州老窖 贵州茅台 山西汾酒 消费复苏 批价 商务宴请 提价 去库存 核心资产"
 
   - name: "旅游ETF"
@@ -378,5 +378,5 @@ funds:
     code: "513220"
     strategy_type: "satellite"
     index_name: "h11136"
-    # [关键词] 覆盖海外中国互联网巨头
+    # [关键词] 覆盖海外资金对中国互联网巨头的估值修复情绪
     sector_keyword: "中概股 互联网 腾讯 阿里巴巴 拼多多 平台经济 监管常态化 消费复苏 海外资金 估值修复"
