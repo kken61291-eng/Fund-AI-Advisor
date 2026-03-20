@@ -310,7 +310,7 @@
     "name": "油气ETF",
     "shares": 794.7019867549669,
     "cost": 1.51,
-    "held_days": 3,
+    "held_days": 4,
     "history": [
       {
         "date": "2026-03-12",
@@ -524,7 +524,7 @@
     "name": "消费ETF",
     "shares": 2459.0163934426228,
     "cost": 0.793,
-    "held_days": 10,
+    "held_days": 11,
     "history": [
       {
         "date": "2026-03-17",
