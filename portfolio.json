@@ -38,7 +38,7 @@
     "name": "有色金属ETF",
     "shares": 1043.2968179447053,
     "cost": 1.917,
-    "held_days": 3,
+    "held_days": 4,
     "history": [
       {
         "date": "2026-03-05",
@@ -322,7 +322,7 @@
     "name": "油气ETF",
     "shares": 794.7019867549669,
     "cost": 1.51,
-    "held_days": 11,
+    "held_days": 12,
     "history": [
       {
         "date": "2026-03-12",
@@ -536,7 +536,7 @@
     "name": "消费ETF",
     "shares": 2459.0163934426228,
     "cost": 0.793,
-    "held_days": 18,
+    "held_days": 19,
     "history": [
       {
         "date": "2026-03-17",
@@ -550,7 +550,7 @@
     "name": "白银ETF",
     "shares": 2403.697996918336,
     "cost": 0.649,
-    "held_days": 2,
+    "held_days": 3,
     "history": [
       {
         "date": "2026-03-23",
