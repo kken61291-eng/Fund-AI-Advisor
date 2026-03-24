@@ -38,7 +38,7 @@
     "name": "有色金属ETF",
     "shares": 1043.2968179447053,
     "cost": 1.917,
-    "held_days": 5,
+    "held_days": 6,
     "history": [
       {
         "date": "2026-03-05",
@@ -209,17 +209,31 @@
   },
   "512100": {
     "name": "中证1000ETF",
-    "shares": 0,
-    "cost": 0.0,
-    "held_days": 0,
-    "history": []
+    "shares": 337.0407819346141,
+    "cost": 2.967,
+    "held_days": 1,
+    "history": [
+      {
+        "date": "2026-03-24",
+        "price": 2.967,
+        "s": "B",
+        "amt": 1000
+      }
+    ]
   },
   "588000": {
     "name": "科创50ETF",
-    "shares": 0,
-    "cost": 0.0,
-    "held_days": 0,
-    "history": []
+    "shares": 902.9345372460497,
+    "cost": 1.329,
+    "held_days": 1,
+    "history": [
+      {
+        "date": "2026-03-24",
+        "price": 1.329,
+        "s": "B",
+        "amt": 1200
+      }
+    ]
   },
   "159509": {
     "name": "纳指科技ETF",
@@ -237,10 +251,17 @@
   },
   "512480": {
     "name": "半导体ETF",
-    "shares": 0,
-    "cost": 0.0,
-    "held_days": 0,
-    "history": []
+    "shares": 842.1052631578947,
+    "cost": 1.425,
+    "held_days": 1,
+    "history": [
+      {
+        "date": "2026-03-24",
+        "price": 1.425,
+        "s": "B",
+        "amt": 1200
+      }
+    ]
   },
   "518880": {
     "name": "黄金ETF",
@@ -322,7 +343,7 @@
     "name": "油气ETF",
     "shares": 794.7019867549669,
     "cost": 1.51,
-    "held_days": 13,
+    "held_days": 14,
     "history": [
       {
         "date": "2026-03-12",
@@ -536,7 +557,7 @@
     "name": "消费ETF",
     "shares": 2459.0163934426228,
     "cost": 0.793,
-    "held_days": 20,
+    "held_days": 21,
     "history": [
       {
         "date": "2026-03-17",
@@ -550,7 +571,7 @@
     "name": "白银ETF",
     "shares": 2403.697996918336,
     "cost": 0.649,
-    "held_days": 4,
+    "held_days": 5,
     "history": [
       {
         "date": "2026-03-23",
@@ -564,7 +585,7 @@
     "name": "金融科技ETF",
     "shares": 2094.972067039106,
     "cost": 0.716,
-    "held_days": 1,
+    "held_days": 2,
     "history": [
       {
         "date": "2026-03-23",
