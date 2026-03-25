@@ -8,6 +8,7 @@ from datetime import datetime
 import hashlib
 import pytz
 import re
+import difflib  # 🟢 新增：用于计算文本相似度
 from bs4 import BeautifulSoup
 
 # --- Selenium 模块 ---
@@ -149,12 +150,10 @@ def fetch_cls_selenium():
         print("   - [Plan B] 正在启动 Chrome 抓取: 财联社 (CLS)...")
         
         chrome_options = Options()
-        # 必须开启无头模式，否则服务器无法运行
         chrome_options.add_argument("--headless") 
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
-        # 伪装 User-Agent
         chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36")
 
         service = Service(ChromeDriverManager().install())
@@ -164,7 +163,6 @@ def fetch_cls_selenium():
         url = "https://www.cls.cn/telegraph"
         driver.get(url)
         
-        # 等待加载
         try:
             WebDriverWait(driver, 15).until(
                 EC.presence_of_element_located((By.CLASS_NAME, "telegraph-list"))
@@ -172,7 +170,6 @@ def fetch_cls_selenium():
         except:
             print("   ⚠️ 等待网页加载超时，尝试直接解析...")
 
-        # 🟢 核心优化：多次向下滚动以加载大量历史数据
         print("   - 正在自动向下滚动网页以加载更多历史电报...")
         for _ in range(4):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
@@ -194,7 +191,6 @@ def fetch_cls_selenium():
                 time_span = node.find("span", class_="telegraph-time")
                 time_str = time_span.get_text().strip() if time_span else ""
                 
-                # 时间补全逻辑
                 if len(time_str) < 10 and ":" in time_str:
                     if len(time_str) <= 5:
                         full_time = f"{current_date_prefix} {time_str}:00"
@@ -229,12 +225,10 @@ def fetch_cls_selenium():
 def fetch_cls():
     """ 综合控制台，混合调度财联社数据获取 """
     items = fetch_cls_api()
-    # 🟢 优化：如果 API 没有抓到数据，或者抓得太少，触发 Selenium 增强机制补充
     if not items or len(items) < 15:
         print("   ⚠️ API 获取数据偏少，启动 Selenium 进行深度抓取补充...")
         sel_items = fetch_cls_selenium()
         
-        # 简单依据标题去重，将 Selenium 的数据合并进来
         seen_titles = set([i['title'] for i in items])
         for si in sel_items:
             if si['title'] not in seen_titles:
@@ -255,31 +249,51 @@ def fetch_and_save_news():
     em_items = fetch_eastmoney()
     all_news_items.extend(em_items)
 
-    # 🟢 核心优化：构建东财新闻纯净文本池（去除所有标点符号），用于智能比对
+    # 🟢 核心优化：构建东财新闻纯净文本池与纯净标题池
     em_clean_texts = set()
+    em_clean_titles = set()
     for item in em_items:
-        # 将标题和正文合并，利用正则只保留中文、英文和数字
         clean_text = re.sub(r'[^\w\u4e00-\u9fa5]', '', item.get('content', '') + item.get('title', ''))
+        clean_title = re.sub(r'[^\w\u4e00-\u9fa5]', '', item.get('title', ''))
+        
         if len(clean_text) >= 10: 
             em_clean_texts.add(clean_text)
+        if len(clean_title) >= 5:
+            em_clean_titles.add(clean_title)
 
     print(f"⏳ 正在启动财联社抓取任务...")
     
     # 2. 财联社
     cls_items_raw = fetch_cls()
 
-    # 🟢 核心优化：拦截已经存在于东财中的财联社重复新闻
+    # 🟢 核心优化：多维度拦截已存在于东财中的重复新闻
     cls_items_filtered = []
     filtered_count = 0
     
     for item in cls_items_raw:
         cls_clean_text = re.sub(r'[^\w\u4e00-\u9fa5]', '', item.get('content', '') + item.get('title', ''))
+        cls_clean_title = re.sub(r'[^\w\u4e00-\u9fa5]', '', item.get('title', ''))
         is_duplicate = False
         
-        if len(cls_clean_text) >= 10:
+        # 拦截层级 1：纯净标题双向包含匹配（过滤绝大多数情况）
+        if len(cls_clean_title) >= 5:
+            for em_title in em_clean_titles:
+                if cls_clean_title in em_title or em_title in cls_clean_title:
+                    is_duplicate = True
+                    break
+
+        # 拦截层级 2：纯净正文高精度比对（针对标题失效、但正文高度相似的情况）
+        if not is_duplicate and len(cls_clean_text) >= 10:
             for em_text in em_clean_texts:
-                # 模糊匹配：如果两段长文本互相包含，即可判定是同一条新闻，触发拦截
+                # 模糊包含匹配
                 if cls_clean_text in em_text or em_text in cls_clean_text:
+                    is_duplicate = True
+                    break
+                
+                # 文本相似度匹配：取前 100 个纯净字符进行相似度计算，克服前缀干扰
+                # 如果前100个字的相似度达到 80% 以上，判定为同一条新闻
+                sim_ratio = difflib.SequenceMatcher(None, cls_clean_text[:100], em_text[:100]).quick_ratio()
+                if sim_ratio > 0.8:
                     is_duplicate = True
                     break
                     
