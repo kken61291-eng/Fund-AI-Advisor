@@ -15,10 +15,17 @@
   },
   "510880": {
     "name": "中证红利ETF",
-    "shares": 0,
-    "cost": 0.0,
-    "held_days": 0,
-    "history": []
+    "shares": 459.4180704441041,
+    "cost": 3.265,
+    "held_days": 1,
+    "history": [
+      {
+        "date": "2026-03-26",
+        "price": 3.265,
+        "s": "B",
+        "amt": 1500
+      }
+    ]
   },
   "159866": {
     "name": "日经225ETF",
@@ -134,7 +141,7 @@
     "name": "证券ETF",
     "shares": 1473.087818696884,
     "cost": 1.059,
-    "held_days": 4,
+    "held_days": 5,
     "history": [
       {
         "date": "2026-03-26",
@@ -308,7 +315,7 @@
     "name": "豆粕ETF",
     "shares": 683.9945280437756,
     "cost": 2.193,
-    "held_days": 6,
+    "held_days": 7,
     "history": [
       {
         "date": "2026-03-25",
@@ -454,7 +461,7 @@
     "name": "油气ETF",
     "shares": 794.7019867549669,
     "cost": 1.51,
-    "held_days": 28,
+    "held_days": 29,
     "history": [
       {
         "date": "2026-03-12",
@@ -719,7 +726,7 @@
     "name": "消费ETF",
     "shares": 2459.0163934426228,
     "cost": 0.793,
-    "held_days": 35,
+    "held_days": 36,
     "history": [
       {
         "date": "2026-03-17",
@@ -733,7 +740,7 @@
     "name": "白银ETF",
     "shares": 2403.697996918336,
     "cost": 0.649,
-    "held_days": 19,
+    "held_days": 20,
     "history": [
       {
         "date": "2026-03-23",
