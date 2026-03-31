@@ -28,7 +28,7 @@ from prompts_config import (
 
 class NewsAnalyst:
     """
-    新闻分析师 - V20.0 终极全息图谱版 (GraphRAG + NLP to Alpha)
+    新闻分析师 - V21.1 解除封印版 (V3.2 全量高价值新闻投喂 + 量化共振)
     """
     def __init__(self):
         self.api_key = os.getenv("LLM_API_KEY")
@@ -118,7 +118,7 @@ class NewsAnalyst:
         if texts_to_encode:
             logger.info(f"🧬 [RAG] 正在清洗并向量化 {len(texts_to_encode)} 条全市场新闻...")
             try:
-                # 🟢 关闭烦人的 Batches 计算进度条: show_progress_bar=False
+                # 🟢 关闭进度条显示
                 embeddings = self.encoder.encode(texts_to_encode, normalize_embeddings=True, show_progress_bar=False)
                 self.index = faiss.IndexFlatIP(embeddings.shape[1]) # 内积计算余弦相似度
                 self.index.add(embeddings)
@@ -135,14 +135,16 @@ class NewsAnalyst:
         # 融合基金名称与配置表中的板块特征，实现精确狙击
         query = f"{fund_name} {sector_keyword}"
         
-        # 🟢 关闭烦人的 Batches 计算进度条: show_progress_bar=False
+        # 🟢 关闭进度条显示
         q_emb = self.encoder.encode([query], normalize_embeddings=True, show_progress_bar=False)
         
-        # 检索 Top 8 最相关新闻
-        D, I = self.index.search(q_emb, k=8)
+        # 🟢 核心非对称扩容：扫描底层扩容到 50 条，充分榨取数量优势
+        search_k = min(50, self.index.ntotal)
+        D, I = self.index.search(q_emb, k=search_k)
 
         sector_catalysts = []
         hype_score_accumulator = 0.0
+        valid_news_count = 0
         now = get_beijing_time()
 
         for idx, sim in zip(I[0], D[0]):
@@ -161,31 +163,34 @@ class NewsAnalyst:
             except:
                 decay_weight = 0.8
 
-            # 累加情绪共振因子
+            # 累加情绪共振因子 (所有前50条合格新闻均参与计算)
             hype_score_accumulator += (sim * decay_weight)
+            valid_news_count += 1
 
+            # 🟢 彻底解除封印：释放 V3.2 恐怖的阅读能力，不再限制 8 条，全部投喂！
             entry = f"[{news['time']}] {news['title']} (相关度:{sim:.2f}, 衰减权重:{decay_weight:.2f}) - 核心实体: {news['entities']}"
             sector_catalysts.append(entry)
 
-        # 归一化 Hype Score (0-100)
-        hype_index = min(100, int(hype_score_accumulator * 15))
+        # 归一化 Hype Score (0-100)，根据50条的累加量级适当调低乘数系数
+        hype_index = min(100, int(hype_score_accumulator * 6))
         macro_str = "\n".join([f"[{m['time']}] {m['title']}" for m in self.macro_news[:3]])
 
-        # 组装极其紧凑、结构化的全息降维面板，喂给 R1
+        # 组装极其紧凑、结构化的全息降维面板，喂给 R1/V3.2
         rag_json = {
             "Macro_Environment": macro_str if macro_str else "今日无全局性宏观异动",
             "Sector_Catalysts": sector_catalysts if sector_catalysts else ["今日无高度相关板块催化剂"],
             "Quantitative_Resonance": {
                 "Hype_Score": hype_index,
-                "News_Count": len(sector_catalysts),
-                "System_Advice": "Hype_Score > 60 说明情绪高度共振，< 30 说明无利好支撑"
+                "Total_Related_News_Scanned": valid_news_count,
+                "News_Provided_To_AI": len(sector_catalysts),
+                "System_Advice": f"底层共检索到 {valid_news_count} 条高价值新闻，转化情绪分为 {hype_index}。>60分说明情绪高度共振，<30说明无利好支撑"
             }
         }
         
         rag_result_str = json.dumps(rag_json, ensure_ascii=False, indent=2)
         
-        # 🟢 在日志中打印 RAG 给该基金提取的情报，方便在 Actions 控制台查看
-        logger.info(f"🎯 [{fund_name}] RAG 专属情报图谱:\n{rag_result_str}")
+        # 🟢 在日志中打印 RAG 给该基金提取的情报
+        logger.info(f"🎯 [{fund_name}] RAG底层扫描了 {valid_news_count} 条关联新闻，浓缩生成情报图谱:\n{rag_result_str}")
         
         return rag_result_str
 
