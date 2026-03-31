@@ -2,8 +2,8 @@ name: News Data Crawler
 
 on:
   schedule:
-    # 每 2 小时执行一次 (UTC 时间，相当于全天候每两小时触发)
-    - cron: '0 */2 * * *'
+    # 每 1 小时执行一次 (UTC 时间，相当于全天候每两小时触发)
+    - cron: '0 */1 * * *'
   workflow_dispatch:
 
 # 必须赋予写入权限
