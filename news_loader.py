@@ -140,8 +140,9 @@ def fetch_eastmoney_direct():
                         show_time = news.get('showtime', '') 
                         content = digest if len(digest) > len(title) else title
                         if not title: continue
+                        # 🟢 移除 source 字段
                         items.append({
-                            "time": show_time, "title": title, "content": content, "source": "EastMoney"
+                            "time": show_time, "title": title, "content": content
                         })
                     print(f"   - [Plan B] 成功解析并获取 {len(items)} 条数据")
             except Exception as parse_e:
@@ -161,8 +162,9 @@ def fetch_eastmoney():
                 content = str(row.get('content', '')).strip()
                 public_time = clean_time_str(row.get('public_time', ''))
                 if not title or len(title) < 2: continue
+                # 🟢 移除 source 字段
                 items.append({
-                    "time": public_time, "title": title, "content": content, "source": "EastMoney"
+                    "time": public_time, "title": title, "content": content
                 })
             print(f"   - [Plan A] 成功获取 {len(items)} 条数据")
             return items
@@ -195,8 +197,9 @@ def fetch_cls_api():
                     final_content = content if content else title
                     full_time = datetime.fromtimestamp(ctime).strftime("%Y-%m-%d %H:%M:%S") if ctime else ""
                     
+                    # 🟢 移除 source 字段
                     items.append({
-                        "time": full_time, "title": final_title, "content": final_content, "source": "CLS"
+                        "time": full_time, "title": final_title, "content": final_content
                     })
                 print(f"   - [Plan A] 成功通过 API 获取 {len(items)} 条财联社数据")
                 return items
@@ -268,8 +271,9 @@ def fetch_cls_selenium():
                 if content_text:
                     title = content_text[:40] + "..." if len(content_text) > 40 else content_text
                     
+                    # 🟢 移除 source 字段
                     items.append({
-                        "time": full_time, "title": title, "content": content_text, "source": "CLS"
+                        "time": full_time, "title": title, "content": content_text
                     })
             except: continue
 
@@ -402,13 +406,13 @@ def fetch_and_save_news():
     today_file = os.path.join(DATA_DIR, f"news_{today_date}.jsonl")
     existing_ids = set()
     
+    # 🟢 由于本地不再存 id 字段，读取时动态生成历史数据的 id 以用于去重
     if os.path.exists(today_file):
         with open(today_file, 'r', encoding='utf-8') as f:
             for line in f:
                 try:
                     saved_item = json.loads(line)
-                    if 'id' in saved_item:
-                        existing_ids.add(saved_item['id'])
+                    existing_ids.add(generate_news_id(saved_item))
                 except: pass
 
     new_count = 0
@@ -416,9 +420,12 @@ def fetch_and_save_news():
 
     with open(today_file, 'a', encoding='utf-8') as f:
         for item in all_news_items:
+            # 🟢 在内存中动态计算 id 进行比对，不再将 id 写入 item 字典
             item_id = generate_news_id(item)
-            item['id'] = item_id
             if item_id not in existing_ids:
+                # 确保字典内干净，直接序列化
+                item.pop('source', None)
+                item.pop('id', None)
                 f.write(json.dumps(item, ensure_ascii=False) + "\n")
                 existing_ids.add(item_id)
                 new_count += 1
