@@ -118,9 +118,10 @@ def process_phase1_proposal(fund, fetcher, tracker, val_engine, analyst, market_
         
         if analyst:
             macro_payload = {"net_flow": market_context.get('net_flow', 0), "leader_status": "UNKNOWN"}
+            # 🟢 [核心穿透点] 把基金关键词向下透传给 RAG 引擎
             ic_res = analyst.analyze_fund_tactical_v6(
                 fund_name, tech, macro_payload, market_context.get('news_summary', ''), 
-                {"fuse_level": 0}, fund.get('strategy_type', 'core')
+                {"fuse_level": 0}, fund.get('strategy_type', 'core'), fund.get('sector_keyword', '')
             )
         else:
             ic_res = None
@@ -174,13 +175,13 @@ def main():
     try: analyst = NewsAnalyst()
     except: analyst = None
 
-    logger.info("🚀 启动 v19.7 认知对抗系统 (Cognitive Adversarial Model)...")
+    logger.info("🚀 启动 v20.0 全息认知对抗系统 (GraphRAG + Agentic Model)...")
 
     market_context = {"news_summary": "无新闻", "net_flow": 0}
     all_news_seen = []
     
     if analyst:
-        logger.info("📡 正在进行宏观扫描与资金流检测...")
+        logger.info("📡 正在触发全量图谱化构建与资金流检测...")
         news_text = analyst.get_market_context()
         net_flow_val = fetcher.get_market_net_flow()
         
@@ -378,7 +379,7 @@ def main():
     
     subject_prefix = "🚧 [测试] " if TEST_MODE else "🕊️ "
     # 还原邮件名称
-    send_email(f"{subject_prefix}鹊知风 v26.03.25 认知对抗报告", html)
+    send_email(f"{subject_prefix}鹊知风 v26.03.31 全息图谱报告", html)
     
     logger.info("✅ 运行结束，邮件已发送。")
 
