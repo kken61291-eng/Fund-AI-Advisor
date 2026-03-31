@@ -118,7 +118,8 @@ class NewsAnalyst:
         if texts_to_encode:
             logger.info(f"🧬 [RAG] 正在清洗并向量化 {len(texts_to_encode)} 条全市场新闻...")
             try:
-                embeddings = self.encoder.encode(texts_to_encode, normalize_embeddings=True)
+                # 🟢 关闭烦人的 Batches 计算进度条: show_progress_bar=False
+                embeddings = self.encoder.encode(texts_to_encode, normalize_embeddings=True, show_progress_bar=False)
                 self.index = faiss.IndexFlatIP(embeddings.shape[1]) # 内积计算余弦相似度
                 self.index.add(embeddings)
                 logger.info("✅ [RAG] 全息向量图谱构建完成！")
@@ -133,7 +134,9 @@ class NewsAnalyst:
 
         # 融合基金名称与配置表中的板块特征，实现精确狙击
         query = f"{fund_name} {sector_keyword}"
-        q_emb = self.encoder.encode([query], normalize_embeddings=True)
+        
+        # 🟢 关闭烦人的 Batches 计算进度条: show_progress_bar=False
+        q_emb = self.encoder.encode([query], normalize_embeddings=True, show_progress_bar=False)
         
         # 检索 Top 8 最相关新闻
         D, I = self.index.search(q_emb, k=8)
@@ -178,7 +181,13 @@ class NewsAnalyst:
                 "System_Advice": "Hype_Score > 60 说明情绪高度共振，< 30 说明无利好支撑"
             }
         }
-        return json.dumps(rag_json, ensure_ascii=False, indent=2)
+        
+        rag_result_str = json.dumps(rag_json, ensure_ascii=False, indent=2)
+        
+        # 🟢 在日志中打印 RAG 给该基金提取的情报，方便在 Actions 控制台查看
+        logger.info(f"🎯 [{fund_name}] RAG 专属情报图谱:\n{rag_result_str}")
+        
+        return rag_result_str
 
     def extract_event_info(self, news_text):
         days_to_event = "NULL"
