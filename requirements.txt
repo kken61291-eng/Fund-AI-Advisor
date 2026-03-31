@@ -20,3 +20,11 @@ selenium>=4.0.0
 webdriver-manager
 # [API防反爬核心] 用于东财
 curl_cffi>=0.5.10
+
+# 🟢 [新增：RAG 与 实体图谱核心依赖]
+# GitHub Actions 默认没有 GPU，必须使用 CPU 版本的 faiss，否则会编译失败
+faiss-cpu
+# 用于驱动 BGE-small 向量模型
+sentence-transformers
+# 用于快速提取新闻实体（TF-IDF）
+jieba
