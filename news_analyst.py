@@ -3,8 +3,16 @@ import json
 import os
 import re
 import time
+import logging
 from datetime import datetime, timedelta
 from utils import logger, retry, get_beijing_time
+
+# 🟢 [静默底层烦人的网络请求日志 (修复红框刷屏)]
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
+logging.getLogger("filelock").setLevel(logging.WARNING)
 
 # 🟢 [RAG 与 NLP 依赖接入]
 try:
@@ -18,7 +26,6 @@ try:
 except ImportError:
     HAS_RAG_DEPS = False
 
-# 【关键修改】移除了 RED_TEAM_AUDIT_PROMPT，防止 ImportError
 from prompts_config import (
     TACTICAL_IC_PROMPT, 
     STRATEGIC_CIO_REPORT_PROMPT, 
@@ -28,13 +35,13 @@ from prompts_config import (
 
 class NewsAnalyst:
     """
-    新闻分析师 - V21.1 解除封印版 (V3.2 全量高价值新闻投喂 + 量化共振)
+    新闻分析师 - V21.3 终极净化版 (无网络刷屏 + 极简折叠日志)
     """
     def __init__(self):
         self.api_key = os.getenv("LLM_API_KEY")
         self.base_url = os.getenv("LLM_BASE_URL")
         
-        # 🟢 完全使用 R1 模型
+        # 🟢 完全使用 R1/V3.2 模型
         self.model_tactical = "Pro/deepseek-ai/DeepSeek-V3.2"       
         self.model_strategic = "Pro/deepseek-ai/DeepSeek-R1"    
 
@@ -167,15 +174,15 @@ class NewsAnalyst:
             hype_score_accumulator += (sim * decay_weight)
             valid_news_count += 1
 
-            # 🟢 彻底解除封印：释放 V3.2 恐怖的阅读能力，不再限制 8 条，全部投喂！
+            # 彻底解除封印：全部投喂！
             entry = f"[{news['time']}] {news['title']} (相关度:{sim:.2f}, 衰减权重:{decay_weight:.2f}) - 核心实体: {news['entities']}"
             sector_catalysts.append(entry)
 
-        # 归一化 Hype Score (0-100)，根据50条的累加量级适当调低乘数系数
+        # 归一化 Hype Score (0-100)
         hype_index = min(100, int(hype_score_accumulator * 6))
         macro_str = "\n".join([f"[{m['time']}] {m['title']}" for m in self.macro_news[:3]])
 
-        # 组装极其紧凑、结构化的全息降维面板，喂给 R1/V3.2
+        # 组装极其紧凑、结构化的全息降维面板，喂给 AI
         rag_json = {
             "Macro_Environment": macro_str if macro_str else "今日无全局性宏观异动",
             "Sector_Catalysts": sector_catalysts if sector_catalysts else ["今日无高度相关板块催化剂"],
@@ -189,8 +196,8 @@ class NewsAnalyst:
         
         rag_result_str = json.dumps(rag_json, ensure_ascii=False, indent=2)
         
-        # 🟢 在日志中打印 RAG 给该基金提取的情报
-        logger.info(f"🎯 [{fund_name}] RAG底层扫描了 {valid_news_count} 条关联新闻，浓缩生成情报图谱:\n{rag_result_str}")
+        # 🟢 控制日志输出：不再打印复杂的 JSON，统一折叠为极简摘要
+        logger.info(f"🎯 [{fund_name}] RAG扫描完成 -> 匹配到 {valid_news_count} 条核心新闻 | 情绪共振分(Hype Score): {hype_index}")
         
         return rag_result_str
 
@@ -213,9 +220,7 @@ class NewsAnalyst:
         return days_to_event, event_tier
 
     def _legacy_get_market_context(self, max_length=35000): 
-        """
-        保留极其稳健的本地新闻读取逻辑 (作为未安装 RAG 环境的退路)
-        """
+        """ 保留极其稳健的本地新闻读取逻辑 """
         today_str = get_beijing_time().strftime("%Y-%m-%d")
         possible_paths = [f"data_news/news_{today_str}.jsonl", f"news_{today_str}.jsonl"]
         
@@ -248,10 +253,8 @@ class NewsAnalyst:
                         
                         entry = f"[{time_str}] [{source}] {title}"
                         if len(content) > 10 and content != title:
-                            # 摘要截断，防止单条新闻过长
                             entry += f"\n   (摘要: {content[:200]}...)"
                         
-                        # 将 raw_time 作为排序依据一起存入
                         news_candidates.append((raw_time, entry))
                     except: pass
         except Exception as e:
@@ -260,10 +263,8 @@ class NewsAnalyst:
         if not news_candidates: 
             return "今日暂无重大新闻。"
         
-        # 1. 按时间倒序排列 (最新的排在前面)
         news_candidates.sort(key=lambda x: x[0], reverse=True)
         
-        # 2. 截断长度，防止超长
         final_list = []
         current_len = 0
         for _, entry in news_candidates:
@@ -284,7 +285,6 @@ class NewsAnalyst:
         if not self.has_rag:
             return self._legacy_get_market_context(max_length)
             
-        # 返回精简版的宏观新闻给 main.py 进行日志打印
         if self.macro_news:
             return "【全局宏观重磅】\n" + "\n".join([f"[{m['time']}] {m['title']}" for m in self.macro_news[:5]])
         return "今日暂无重大宏观新闻。"
@@ -293,7 +293,6 @@ class NewsAnalyst:
         try:
             text = re.sub(r'```json\s*', '', text)
             text = re.sub(r'```', '', text)
-            # 清理 R1 的思考过程
             text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
             start, end = text.find('{'), text.rfind('}')
             if start != -1 and end != -1: return text[start:end+1]
@@ -301,9 +300,6 @@ class NewsAnalyst:
         except: return "{}"
 
     def _safe_post_stream(self, payload, timeout=600):
-        """
-        🟢 [防御断连核心] 使用流式接收(Stream)绕过服务器 300 秒网关静默超时。
-        """
         payload['stream'] = True
         full_content = ""
         
@@ -312,7 +308,6 @@ class NewsAnalyst:
         if resp.status_code != 200:
             raise Exception(f"HTTP Error {resp.status_code}: {resp.text}")
             
-        # 逐行读取流数据，只要有数据流动，网关就不会断开 TCP 连接
         for line in resp.iter_lines():
             if line:
                 line_str = line.decode('utf-8').strip()
@@ -321,7 +316,6 @@ class NewsAnalyst:
                     if data_str == "[DONE]": 
                         break
                     try:
-                        # stream 流数据往往不包含全量 JSON，这不影响，只提取 delta
                         chunk = json.loads(data_str, strict=False)
                         if "choices" in chunk and len(chunk["choices"]) > 0:
                             delta = chunk["choices"][0].get("delta", {})
@@ -340,22 +334,20 @@ class NewsAnalyst:
         trend_score = tech.get('quant_score', 0)
         days_to_event, event_tier = self.extract_event_info(news_text)
 
-        # 🟢 提取系统计算的风报比/盈亏比数据
         risk_reward = tech.get('risk_reward', {})
         upside_space = risk_reward.get('upside_space_pct', 0.0)
         downside_risk = risk_reward.get('downside_risk_pct', 0.0)
         ratio = risk_reward.get('ratio', 0.0)
 
-        # 🟢 [核心打击] 如果开启了 RAG，直接抛弃冗长的 news_text，获取极高密度的结构化情报 JSON
+        # 🟢 [核心打击] 如果开启了 RAG，获取极高密度的结构化情报 JSON
         if self.has_rag and self.index is not None:
             final_news_content = self.get_fund_rag_context(fund_name, sector_keyword)
         else:
             final_news_content = str(news_text)[:8000]
 
         try:
-            # 【关键补齐】填补 v19.6.5 Prompt 必须的额外参数，防止 KeyError 崩溃
             prompt = TACTICAL_IC_PROMPT.format(
-                market_risk_level="MEDIUM", # 此处可升级为动态水位检测
+                market_risk_level="MEDIUM", 
                 allowed_modes="['A', 'B', 'C']",
                 forbidden_modes="[]",
                 max_position="15%",
@@ -367,10 +359,9 @@ class NewsAnalyst:
                 rsi=tech.get('rsi', 50),
                 volatility_status=tech.get('volatility_status', '-'),
                 recent_gain=tech.get('recent_gain', 0),
-                drawdown_20d=tech.get('drawdown_20d', 5), # 降级默认值
+                drawdown_20d=tech.get('drawdown_20d', 5), 
                 volume_percentile=tech.get('volume_percentile', 50),
                 
-                # 将测算好的风报比数据注入到 Prompt 供 CGO 裁决
                 upside_space=upside_space,
                 downside_risk=downside_risk,
                 ratio=ratio,
@@ -380,7 +371,7 @@ class NewsAnalyst:
                 sector_breadth=tech.get('sector_breadth', 50),
                 days_to_event=days_to_event,
                 event_tier=event_tier,
-                decayed_weight=0.8, # 这里的硬编码在 RAG 内已经动态计算了，保留以防 Prompt 缺参数报错
+                decayed_weight=0.8,
                 decay_func="exponential",
                 news_content=final_news_content,
                 fundamental_risk="立案调查, 财务造假, 退市风险"
@@ -398,9 +389,7 @@ class NewsAnalyst:
         }
         
         try:
-            # 加入流式处理防断连
             raw_text = self._safe_post_stream(payload, timeout=600)
-            # 终极防崩溃：strict=False 允许大模型在文本里输入原生换行符和制表符
             result = json.loads(self._clean_json(raw_text), strict=False)
             result['days_to_event'] = days_to_event
             return result
@@ -415,7 +404,6 @@ class NewsAnalyst:
         candidates_str = json.dumps(candidates, indent=2, ensure_ascii=False)
         
         try:
-            # 【关键补齐】V19.6.5 风控测试矩阵必须的参数
             prompt = RISK_CONTROL_VETO_PROMPT.format(
                 market_risk_level="MEDIUM",
                 candidate_count=len(candidates),
