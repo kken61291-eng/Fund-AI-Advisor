@@ -8,7 +8,7 @@ from datetime import datetime
 import hashlib
 import pytz
 import re
-import difflib  # 🟢 新增：用于计算文本相似度
+import difflib  # 🟢 用于计算文本相似度
 from bs4 import BeautifulSoup
 
 # --- Selenium 模块 ---
@@ -27,6 +27,29 @@ except ImportError:
 DATA_DIR = "data_news"
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
+
+# 🟢 深度丰富的：新闻价值评估词库
+IMPORTANT_KEYWORDS = [
+    # 宏观与核心机构
+    "央行", "证监会", "发改委", "国务院", "财政部", "外汇局", "金融监管总局", "工信部", "商务部", "统计局", "美联储", "欧央行", "政治局", "国常会",
+    # 货币与财政政策
+    "降息", "降准", "LPR", "MLF", "逆回购", "减税", "免税", "万亿", "千亿", "特别国债", "专项债",
+    # 市场情绪与极值
+    "重磅", "突破", "新规", "反垄断", "暴涨", "暴跌", "涨停", "跌停", "地天板", "天地板", "历史新高", "历史新低", "熔断", "爆仓", "黑天鹅", "灰犀牛",
+    # 重大企业与行业事件
+    "停牌", "退市", "立案调查", "借壳", "资产重组", "举牌", "大额增持", "大额回购", "业绩大增", "扭亏为盈", "制裁", "关税",
+    # 关键经济数据
+    "CPI", "PPI", "PMI", "GDP", "非农", "社融", "外汇储备"
+]
+
+TRASH_KEYWORDS = [
+    # 互动与水文
+    "互动平台表示", "投资者提问", "董秘", "感谢您的关注", "感谢关注", "投资者关系活动", "调研纪要", "暂无计划", "不涉及相关业务", "传闻不实", "注意投资风险",
+    # 例行公告与流程
+    "例行", "正常波动", "无重大未披露", "异动公告", "交易异常波动", "补充质押", "解质押", "质押延期", "减持计划", "集中竞价减持",
+    "届董事会", "届监事会", "换届选举", "辞职报告", "聘任", "股东大会", "决议公告", "进展公告", "例行维护", "正常开展", "提示性公告",
+    "工商变更", "变更注册地址", "修改公司章程", "完成注销", "核准"
+]
 
 def get_beijing_time():
     return datetime.now(pytz.timezone('Asia/Shanghai'))
@@ -48,6 +71,45 @@ def clean_time_str(t_str):
         return str(t_str)
     except:
         return str(t_str)
+
+# ==========================================
+# 🟢 核心优化 - 新闻分级与清洗模块
+# ==========================================
+def evaluate_and_clean_news(title, content):
+    """
+    根据关键词对新闻进行分级处理
+    返回: (处理后的内容, 是否保留该条新闻)
+    """
+    full_text = f"{title} {content}"
+    
+    # 1. 判断是否为“垃圾/不重要”新闻（命中无用词且未命中重要词）
+    is_trash = any(kw in full_text for kw in TRASH_KEYWORDS)
+    is_important = any(kw in full_text for kw in IMPORTANT_KEYWORDS)
+    
+    if is_trash and not is_important:
+        return "", False # 直接丢弃
+        
+    # 2. 判断是否为“重要”新闻
+    if is_important:
+        return content, True # 原样全量保留
+        
+    # 3. “一般”新闻进行精简（保留第一句话或截断）
+    # 尝试按句号/感叹号切分，提取核心的首句
+    sentences = re.split(r'([。！？!?])', content)
+    if len(sentences) > 1:
+        # 拼接第一句话和它的标点符号
+        simplified_content = sentences[0] + sentences[1]
+    else:
+        # 如果没有明显标点，最多保留 60 个字符
+        simplified_content = content[:60] + "..." if len(content) > 60 else content
+        
+    return simplified_content, True
+
+def calculate_jaccard_similarity(text1, text2):
+    """ 计算字符集合相似度，弥补 difflib 对语序敏感的缺陷 """
+    set1, set2 = set(text1), set(text2)
+    if not set1 or not set2: return 0.0
+    return len(set1.intersection(set2)) / len(set1.union(set2))
 
 # ==========================================
 # 1. 东财抓取 (双保险模式)
@@ -112,7 +174,6 @@ def fetch_eastmoney():
 # 2. 财联社抓取 (API + Selenium 双保险增强版)
 # ==========================================
 def fetch_cls_api():
-    """ 🟢 新增：尝试通过公开 API 直接获取财联社电报，速度极快 """
     items = []
     try:
         print("   - [Plan A] 正在尝试通过 API 抓取: 财联社 (CLS)...")
@@ -245,11 +306,24 @@ def fetch_and_save_news():
     
     all_news_items = []
 
-    # 1. 东财
-    em_items = fetch_eastmoney()
+    # 1. 东财 (抓取 + 评估清洗)
+    raw_em_items = fetch_eastmoney()
+    em_items = []
+    discarded_em_count = 0
+    for item in raw_em_items:
+        new_content, keep = evaluate_and_clean_news(item['title'], item['content'])
+        if keep:
+            item['content'] = new_content
+            em_items.append(item)
+        else:
+            discarded_em_count += 1
+            
+    if discarded_em_count > 0:
+        print(f"   🗑️ [清洗] 剔除了 {discarded_em_count} 条东财低价值新闻。")
+
     all_news_items.extend(em_items)
 
-    # 🟢 核心优化：构建东财新闻纯净文本池与纯净标题池
+    # 🟢 构建东财新闻纯净文本池与纯净标题池 (仅使用清洗后的高质量数据)
     em_clean_texts = set()
     em_clean_titles = set()
     for item in em_items:
@@ -263,53 +337,66 @@ def fetch_and_save_news():
 
     print(f"⏳ 正在启动财联社抓取任务...")
     
-    # 2. 财联社
+    # 2. 财联社 (抓取)
     cls_items_raw = fetch_cls()
 
-    # 🟢 核心优化：多维度拦截已存在于东财中的重复新闻
+    # 🟢 核心优化：清洗财联社数据 + 多维度拦截重复新闻
     cls_items_filtered = []
-    filtered_count = 0
+    filtered_duplicate_count = 0
+    discarded_cls_count = 0
     
     for item in cls_items_raw:
+        # 首先进行价值评估清洗
+        new_content, keep = evaluate_and_clean_news(item['title'], item['content'])
+        if not keep:
+            discarded_cls_count += 1
+            continue
+            
+        item['content'] = new_content
+        
         cls_clean_text = re.sub(r'[^\w\u4e00-\u9fa5]', '', item.get('content', '') + item.get('title', ''))
         cls_clean_title = re.sub(r'[^\w\u4e00-\u9fa5]', '', item.get('title', ''))
         is_duplicate = False
         
-        # 拦截层级 1：纯净标题双向包含匹配（过滤绝大多数情况）
+        # 拦截层级 1：纯净标题双向包含匹配
         if len(cls_clean_title) >= 5:
             for em_title in em_clean_titles:
                 if cls_clean_title in em_title or em_title in cls_clean_title:
                     is_duplicate = True
                     break
 
-        # 拦截层级 2：纯净正文高精度比对（针对标题失效、但正文高度相似的情况）
+        # 拦截层级 2：纯净正文高精度比对 (结合 difflib 和 Jaccard)
         if not is_duplicate and len(cls_clean_text) >= 10:
             for em_text in em_clean_texts:
-                # 模糊包含匹配
                 if cls_clean_text in em_text or em_text in cls_clean_text:
                     is_duplicate = True
                     break
                 
-                # 文本相似度匹配：取前 100 个纯净字符进行相似度计算，克服前缀干扰
-                # 如果前100个字的相似度达到 80% 以上，判定为同一条新闻
-                sim_ratio = difflib.SequenceMatcher(None, cls_clean_text[:100], em_text[:100]).quick_ratio()
-                if sim_ratio > 0.8:
+                # 双维度相似度计算：弥补单一算法的缺陷
+                cls_prefix, em_prefix = cls_clean_text[:100], em_text[:100]
+                sim_ratio = difflib.SequenceMatcher(None, cls_prefix, em_prefix).quick_ratio()
+                jaccard_ratio = calculate_jaccard_similarity(cls_prefix, em_prefix)
+                
+                # 只要任意一种相似度达到阈值，就判定为重复
+                if sim_ratio > 0.75 or jaccard_ratio > 0.7:
                     is_duplicate = True
                     break
                     
         if is_duplicate:
-            filtered_count += 1
+            filtered_duplicate_count += 1
         else:
             cls_items_filtered.append(item)
 
-    if filtered_count > 0:
-        print(f"   🛡️ [去重拦截] 发现 {filtered_count} 条财联社新闻已在东财中播报过，自动拦截过滤。")
+    if discarded_cls_count > 0:
+        print(f"   🗑️ [清洗] 剔除了 {discarded_cls_count} 条财联社低价值新闻。")
+    if filtered_duplicate_count > 0:
+        print(f"   🛡️ [去重] 发现 {filtered_duplicate_count} 条财联社新闻已在东财中播报过，自动拦截过滤。")
 
     all_news_items.extend(cls_items_filtered)
 
     # 3. 入库
     if not all_news_items:
-        print("⚠️ 未获取到任何新闻数据")
+        print("⚠️ 未获取到任何有效新闻数据")
         return
 
     today_file = os.path.join(DATA_DIR, f"news_{today_date}.jsonl")
