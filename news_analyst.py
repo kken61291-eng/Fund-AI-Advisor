@@ -4,6 +4,7 @@ import os
 import re
 import time
 import logging
+import difflib  # 🟢 [新增] 用于 RAG 提取结果的高精度去重
 from datetime import datetime, timedelta
 from utils import logger, retry, get_beijing_time
 
@@ -35,7 +36,7 @@ from prompts_config import (
 
 class NewsAnalyst:
     """
-    新闻分析师 - V21.3 终极净化版 (无网络刷屏 + 极简折叠日志)
+    新闻分析师 - V21.4 终极提纯版 (动态高精度去重 + 情绪分离度量)
     """
     def __init__(self):
         self.api_key = os.getenv("LLM_API_KEY")
@@ -56,6 +57,8 @@ class NewsAnalyst:
         self.index = None
         self.news_data = []
         self.macro_news = []
+        
+        self._has_logged_rag_sample = False
 
     def init_rag_system(self):
         """ 🟢 核心提效：构建基于本地新闻的向量知识库与实体图谱 """
@@ -125,7 +128,6 @@ class NewsAnalyst:
         if texts_to_encode:
             logger.info(f"🧬 [RAG] 正在清洗并向量化 {len(texts_to_encode)} 条全市场新闻...")
             try:
-                # 🟢 关闭进度条显示
                 embeddings = self.encoder.encode(texts_to_encode, normalize_embeddings=True, show_progress_bar=False)
                 self.index = faiss.IndexFlatIP(embeddings.shape[1]) # 内积计算余弦相似度
                 self.index.add(embeddings)
@@ -141,15 +143,14 @@ class NewsAnalyst:
 
         # 融合基金名称与配置表中的板块特征，实现精确狙击
         query = f"{fund_name} {sector_keyword}"
-        
-        # 🟢 关闭进度条显示
         q_emb = self.encoder.encode([query], normalize_embeddings=True, show_progress_bar=False)
         
-        # 🟢 核心非对称扩容：扫描底层扩容到 50 条，充分榨取数量优势
+        # 扫描底层扩容到 50 条
         search_k = min(50, self.index.ntotal)
         D, I = self.index.search(q_emb, k=search_k)
 
         sector_catalysts = []
+        accepted_titles = [] # 🟢 [新增] 用于存储已接纳的新闻标题，辅助去重
         hype_score_accumulator = 0.0
         valid_news_count = 0
         now = get_beijing_time()
@@ -158,7 +159,7 @@ class NewsAnalyst:
             if idx == -1 or sim < 0.40: continue # 过滤低相关度噪声
             news = self.news_data[idx]
 
-            # 🟢 时间衰减权重计算 (越新的新闻效力越强)
+            # 时间衰减权重计算
             try:
                 t_str = news['time']
                 if len(t_str) == 19:
@@ -166,15 +167,32 @@ class NewsAnalyst:
                 else:
                     news_time = datetime.strptime(t_str, "%Y-%m-%d %H:%M").replace(tzinfo=pytz.timezone('Asia/Shanghai'))
                 hours_diff = (now - news_time).total_seconds() / 3600.0
-                decay_weight = np.exp(-0.05 * max(0, hours_diff)) # 指数衰减
+                decay_weight = np.exp(-0.05 * max(0, hours_diff))
             except:
                 decay_weight = 0.8
 
-            # 累加情绪共振因子 (所有前50条合格新闻均参与计算)
+            # 🟢 [核心剥离] 所有通过 0.4 阈值的新闻，全部计入热度分（说明媒体在疯狂复读，热度高）
             hype_score_accumulator += (sim * decay_weight)
             valid_news_count += 1
 
-            # 彻底解除封印：全部投喂！
+            # 🟢 [核心去重] 拦截废话：如果内容高度相似，不计入给 AI 的文本中
+            news_title = news['title']
+            is_duplicate = False
+            for seen_title in accepted_titles:
+                # 规则 1：子串包含关系 (如："特发信息涨停" 与 "光纤概念特发信息涨停")
+                if news_title in seen_title or seen_title in news_title:
+                    is_duplicate = True
+                    break
+                # 规则 2：语义高相似度匹配 (只要字符相似度 > 80% 则判定为重复)
+                if difflib.SequenceMatcher(None, news_title, seen_title).quick_ratio() > 0.8:
+                    is_duplicate = True
+                    break
+            
+            if is_duplicate:
+                continue # 发现重复，直接跳过文字拼装阶段
+
+            # 记录唯一标题，并将情报加入 AI 投喂列表
+            accepted_titles.append(news_title)
             entry = f"[{news['time']}] {news['title']} (相关度:{sim:.2f}, 衰减权重:{decay_weight:.2f}) - 核心实体: {news['entities']}"
             sector_catalysts.append(entry)
 
@@ -182,22 +200,25 @@ class NewsAnalyst:
         hype_index = min(100, int(hype_score_accumulator * 6))
         macro_str = "\n".join([f"[{m['time']}] {m['title']}" for m in self.macro_news[:3]])
 
-        # 组装极其紧凑、结构化的全息降维面板，喂给 AI
+        # 组装全息面板
         rag_json = {
             "Macro_Environment": macro_str if macro_str else "今日无全局性宏观异动",
             "Sector_Catalysts": sector_catalysts if sector_catalysts else ["今日无高度相关板块催化剂"],
             "Quantitative_Resonance": {
                 "Hype_Score": hype_index,
-                "Total_Related_News_Scanned": valid_news_count,
-                "News_Provided_To_AI": len(sector_catalysts),
-                "System_Advice": f"底层共检索到 {valid_news_count} 条高价值新闻，转化情绪分为 {hype_index}。>60分说明情绪高度共振，<30说明无利好支撑"
+                "Total_Related_News_Scanned": valid_news_count,       # 底层发现的新闻数量（包含重复发酵）
+                "Unique_Clues_Extracted": len(sector_catalysts),      # 去重后提取的精华独立线索数
+                "System_Advice": f"底层侦测到 {valid_news_count} 次相关报道，去重后提炼出 {len(sector_catalysts)} 条独立线索。情绪分为 {hype_index}。"
             }
         }
         
         rag_result_str = json.dumps(rag_json, ensure_ascii=False, indent=2)
         
-        # 🟢 控制日志输出：不再打印复杂的 JSON，统一折叠为极简摘要
-        logger.info(f"🎯 [{fund_name}] RAG扫描完成 -> 匹配到 {valid_news_count} 条核心新闻 | 情绪共振分(Hype Score): {hype_index}")
+        if not self._has_logged_rag_sample:
+            logger.info(f"🎯 [{fund_name}] RAG扫描完成 (首个示例) -> 总命中: {valid_news_count}条 | 去重后独立线索: {len(sector_catalysts)}条 | 情绪分: {hype_index}\n{rag_result_str}")
+            self._has_logged_rag_sample = True
+        else:
+            logger.info(f"🎯 [{fund_name}] RAG扫描完成 -> 命中 {valid_news_count} 条，去重提取 {len(sector_catalysts)} 核心线索 | Hype Score: {hype_index}")
         
         return rag_result_str
 
@@ -247,7 +268,6 @@ class NewsAnalyst:
                         content = str(item.get('content') or item.get('digest') or "").strip()
                         source = str(item.get('source', 'Local')).strip()
                         
-                        # 提取并格式化时间
                         raw_time = str(item.get('time', ''))
                         time_str = raw_time[:16] if len(raw_time) >= 16 else raw_time
                         
@@ -279,12 +299,8 @@ class NewsAnalyst:
         return result_text
 
     def get_market_context(self, max_length=35000):
-        """ 🟢 挂载点：系统启动时触发构建 RAG 图谱 """
         self.init_rag_system()
-        
-        if not self.has_rag:
-            return self._legacy_get_market_context(max_length)
-            
+        if not self.has_rag: return self._legacy_get_market_context(max_length)
         if self.macro_news:
             return "【全局宏观重磅】\n" + "\n".join([f"[{m['time']}] {m['title']}" for m in self.macro_news[:5]])
         return "今日暂无重大宏观新闻。"
@@ -339,7 +355,7 @@ class NewsAnalyst:
         downside_risk = risk_reward.get('downside_risk_pct', 0.0)
         ratio = risk_reward.get('ratio', 0.0)
 
-        # 🟢 [核心打击] 如果开启了 RAG，获取极高密度的结构化情报 JSON
+        # 🟢 如果开启了 RAG，获取极高密度的结构化情报 JSON
         if self.has_rag and self.index is not None:
             final_news_content = self.get_fund_rag_context(fund_name, sector_keyword)
         else:
@@ -400,7 +416,6 @@ class NewsAnalyst:
     @retry(retries=2, delay=5)
     def run_risk_committee_veto(self, candidates):
         if not candidates: return {"approved_list": [], "rejected_log": [], "risk_summary": "无提案提交"}
-
         candidates_str = json.dumps(candidates, indent=2, ensure_ascii=False)
         
         try:
