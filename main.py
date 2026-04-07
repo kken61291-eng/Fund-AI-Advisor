@@ -175,7 +175,7 @@ def main():
     try: analyst = NewsAnalyst()
     except: analyst = None
 
-    logger.info("🚀 启动 v20.0 全息认知对抗系统 (GraphRAG + Agentic Model)...")
+    logger.info("🚀 启动 v20.5 全息认知对抗系统 (GraphRAG + Agentic Model)...")
 
     market_context = {"news_summary": "无新闻", "net_flow": 0}
     all_news_seen = []
@@ -358,12 +358,55 @@ def main():
 
     cio_html = ""
     if analyst:
-        logger.info("🧠 正在生成 CIO 战略定调 (基于风控报告)...")
+        logger.info("🧠 正在生成 CIO 战略定调 (基于微观拓扑投影与强迫推理)...")
         try:
+            # --- [核心重构] CIO 数据挟持与强制 Prompt 注入 ---
+            total_funds = len(final_results)
+            mode_counts = {'A': 0, 'B': 0, 'C': 0, 'D': 0}
+            tech_scores = []
+            portfolio_status = []
+            
+            for res in final_results:
+                mode = res.get('ai_full', {}).get('strategy_meta', {}).get('mode', 'D')
+                if mode in mode_counts:
+                    mode_counts[mode] += 1
+                tech_score = res.get('tech', {}).get('quant_score', 0)
+                tech_scores.append(tech_score)
+                
+                # 提取当前持仓的真实体检数据
+                pos = tracker.get_position(res['code'])
+                if pos['shares'] > 0:
+                    portfolio_status.append({
+                        "code": res['code'],
+                        "name": res['name'],
+                        "current_mode": mode,
+                        "tech_score": tech_score,
+                        "held_days": pos['held_days'],
+                        "recent_5d_gain": res.get('tech', {}).get('recent_gain', 0)
+                    })
+
+            avg_tech_score = sum(tech_scores) / max(1, len(tech_scores))
+            
+            # 构建“数学紧身衣” JSON 载荷
+            cio_injected_payload = {
+                "_SYSTEM_DIRECTIVE_": "你现在是顶尖量化机构的首席投资官(CIO)。禁止使用'平衡'、'或许'、'观望'等笼统废话！你必须作为最高指挥官，基于下方的【微观拓扑统计】和【持仓真实病灶】进行绝对理性的演绎推断。找出核心矛盾，精准点名板块，下达硬性指令。严格返回JSON格式，必须包含: cio_strategic_review (含 risk_rationale, strategic_stance, constraints), defensive_allocation, assumption_monitoring, strategic_veto_list。",
+                "micro_structure_stats": {
+                    "total_scanned_assets": total_funds,
+                    "mode_distribution": mode_counts,
+                    "average_quant_score": round(avg_tech_score, 2),
+                    "market_temperature_warning": "D轨极度拥挤，流动性枯竭(防守为主)" if mode_counts.get('D', 0) > total_funds * 0.6 else ("A轨过热，防范拥挤踩踏" if mode_counts.get('A', 0) > total_funds * 0.5 else "结构性分化博弈")
+                },
+                "live_portfolio_autopsy": portfolio_status,
+                "risk_committee_vetoes": risk_report_raw if 'risk_report_raw' in locals() else risk_report
+            }
+            
+            # 将包装好的强指令与微观数据直接塞入大模型，代替原本干瘪的 risk_report
             raw_cio = analyst.generate_cio_strategy(
                 datetime.now().strftime("%Y-%m-%d"), 
-                risk_report_raw if 'risk_report_raw' in locals() else risk_report
+                cio_injected_payload
             )
+            # --- 重构结束 ---
+
             if raw_cio:
                 # 兼容性修复：剔除可能存在的大模型 Markdown 代码块标记，防止 json 解析失败
                 raw_cio = raw_cio.replace('```json', '').replace('```', '').strip()
