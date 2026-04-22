@@ -3,11 +3,11 @@ name: Daily AI Fund Advisor (Analysis)
 on:
   schedule:
     # 北京时间 09:00 (UTC 01:00) 工作日
-    - cron: '0 1 * * 1-5'
+    - cron: '0 0 * * 1-5'
     # 北京时间 12:00 (UTC 04:00) 工作日
-    - cron: '0 4 * * 1-5'
+    - cron: '0 1 * * 1-5'
     # 北京时间 14:00 (UTC 06:00) 工作日
-    - cron: '0 6 * * 1-5'
+    - cron: '0 4 * * 1-5'
   workflow_dispatch:
 
 concurrency: 
