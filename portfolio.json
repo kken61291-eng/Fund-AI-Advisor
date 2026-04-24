@@ -184,7 +184,7 @@
     "name": "证券ETF",
     "shares": 4759.604672629468,
     "cost": 1.0652,
-    "held_days": 76,
+    "held_days": 77,
     "history": [
       {
         "date": "2026-03-26",
@@ -346,7 +346,7 @@
     "name": "恒生科技ETF",
     "shares": 9943.194068719871,
     "cost": 0.6276,
-    "held_days": 31,
+    "held_days": 32,
     "history": [
       {
         "date": "2026-03-10",
@@ -388,9 +388,9 @@
   },
   "159981": {
     "name": "能源化工ETF",
-    "shares": 1622.6430922860632,
-    "cost": 1.664,
-    "held_days": 7,
+    "shares": 2343.363813006784,
+    "cost": 1.6643,
+    "held_days": 8,
     "history": [
       {
         "date": "2026-03-10",
@@ -439,6 +439,12 @@
         "price": 1.672,
         "s": "B",
         "amt": 1500
+      },
+      {
+        "date": "2026-04-24",
+        "price": 1.665,
+        "s": "B",
+        "amt": 1200
       }
     ]
   },
@@ -553,7 +559,7 @@
     "name": "豆粕ETF",
     "shares": 691.8819188191882,
     "cost": 2.168,
-    "held_days": 6,
+    "held_days": 7,
     "history": [
       {
         "date": "2026-03-25",
@@ -579,7 +585,7 @@
     "name": "半导体ETF",
     "shares": 768.7379884689302,
     "cost": 1.561,
-    "held_days": 31,
+    "held_days": 32,
     "history": [
       {
         "date": "2026-04-07",
@@ -783,7 +789,7 @@
     "name": "油气ETF",
     "shares": 794.7019867549669,
     "cost": 1.51,
-    "held_days": 100,
+    "held_days": 101,
     "history": [
       {
         "date": "2026-03-12",
@@ -973,7 +979,7 @@
     "name": "数字经济ETF",
     "shares": 815.7715839564921,
     "cost": 1.471,
-    "held_days": 37,
+    "held_days": 38,
     "history": [
       {
         "date": "2026-03-24",
@@ -1195,7 +1201,7 @@
     "name": "消费ETF",
     "shares": 2459.0163934426228,
     "cost": 0.793,
-    "held_days": 107,
+    "held_days": 108,
     "history": [
       {
         "date": "2026-03-17",
@@ -1209,7 +1215,7 @@
     "name": "白银ETF",
     "shares": 7189.075383149649,
     "cost": 0.651,
-    "held_days": 91,
+    "held_days": 92,
     "history": [
       {
         "date": "2026-03-23",
@@ -1343,7 +1349,7 @@
     "name": "稀土ETF",
     "shares": 857.7555396711937,
     "cost": 1.399,
-    "held_days": 33,
+    "held_days": 34,
     "history": [
       {
         "date": "2026-04-09",
