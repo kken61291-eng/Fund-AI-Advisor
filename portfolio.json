@@ -70,7 +70,7 @@
     "name": "有色金属ETF",
     "shares": 1226.47371637272,
     "cost": 2.2014,
-    "held_days": 2,
+    "held_days": 3,
     "history": [
       {
         "date": "2026-03-25",
@@ -184,7 +184,7 @@
     "name": "证券ETF",
     "shares": 2472.3379180789393,
     "cost": 1.0921,
-    "held_days": 8,
+    "held_days": 9,
     "history": [
       {
         "date": "2026-03-26",
@@ -364,7 +364,7 @@
     "name": "恒生科技ETF",
     "shares": 3066.0377358490564,
     "cost": 0.636,
-    "held_days": 1,
+    "held_days": 2,
     "history": [
       {
         "date": "2026-03-10",
@@ -420,7 +420,7 @@
     "name": "能源化工ETF",
     "shares": 2176.108113696302,
     "cost": 1.6543,
-    "held_days": 5,
+    "held_days": 6,
     "history": [
       {
         "date": "2026-04-22",
@@ -595,7 +595,7 @@
     "name": "豆粕ETF",
     "shares": 693.1608133086876,
     "cost": 2.164,
-    "held_days": 7,
+    "held_days": 8,
     "history": [
       {
         "date": "2026-03-25",
@@ -837,7 +837,7 @@
     "name": "油气ETF",
     "shares": 794.7019867549669,
     "cost": 1.51,
-    "held_days": 140,
+    "held_days": 141,
     "history": [
       {
         "date": "2026-03-12",
@@ -1178,9 +1178,9 @@
   },
   "513220": {
     "name": "中概互联ETF",
-    "shares": 0,
-    "cost": 0.0,
-    "held_days": 0,
+    "shares": 1379.9448022079118,
+    "cost": 1.087,
+    "held_days": 1,
     "history": [
       {
         "date": "2026-04-16",
@@ -1193,6 +1193,12 @@
         "price": 1.051,
         "s": "S",
         "amt": -1169
+      },
+      {
+        "date": "2026-05-14",
+        "price": 1.087,
+        "s": "B",
+        "amt": 1500
       }
     ]
   },
@@ -1279,7 +1285,7 @@
     "name": "消费ETF",
     "shares": 2459.0163934426228,
     "cost": 0.793,
-    "held_days": 147,
+    "held_days": 148,
     "history": [
       {
         "date": "2026-03-17",
@@ -1527,7 +1533,7 @@
     "name": "航运ETF",
     "shares": 4826.732673267326,
     "cost": 0.404,
-    "held_days": 7,
+    "held_days": 8,
     "history": [
       {
         "date": "2026-05-11",
