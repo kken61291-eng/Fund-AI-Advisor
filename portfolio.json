@@ -370,7 +370,7 @@
     "name": "恒生科技ETF",
     "shares": 3066.0377358490564,
     "cost": 0.636,
-    "held_days": 8,
+    "held_days": 9,
     "history": [
       {
         "date": "2026-03-10",
@@ -426,7 +426,7 @@
     "name": "能源化工ETF",
     "shares": 2176.108113696302,
     "cost": 1.6543,
-    "held_days": 12,
+    "held_days": 13,
     "history": [
       {
         "date": "2026-04-22",
@@ -849,7 +849,7 @@
     "name": "油气ETF",
     "shares": 794.7019867549669,
     "cost": 1.51,
-    "held_days": 147,
+    "held_days": 148,
     "history": [
       {
         "date": "2026-03-12",
@@ -949,7 +949,7 @@
     "name": "电池ETF",
     "shares": 1023.0179028132992,
     "cost": 1.173,
-    "held_days": 4,
+    "held_days": 5,
     "history": [
       {
         "date": "2026-03-11",
@@ -1309,7 +1309,7 @@
     "name": "消费ETF",
     "shares": 2459.0163934426228,
     "cost": 0.793,
-    "held_days": 154,
+    "held_days": 155,
     "history": [
       {
         "date": "2026-03-17",
@@ -1499,9 +1499,9 @@
   },
   "513350": {
     "name": "标普油气ETF",
-    "shares": 0,
-    "cost": 0.0,
-    "held_days": 0,
+    "shares": 1116.0714285714284,
+    "cost": 1.344,
+    "held_days": 1,
     "history": [
       {
         "date": "2026-04-17",
@@ -1550,6 +1550,12 @@
         "price": 1.265,
         "s": "S",
         "amt": -4368
+      },
+      {
+        "date": "2026-05-18",
+        "price": 1.344,
+        "s": "B",
+        "amt": 1500
       }
     ]
   },
@@ -1557,7 +1563,7 @@
     "name": "航运ETF",
     "shares": 4826.732673267326,
     "cost": 0.404,
-    "held_days": 14,
+    "held_days": 15,
     "history": [
       {
         "date": "2026-05-11",
